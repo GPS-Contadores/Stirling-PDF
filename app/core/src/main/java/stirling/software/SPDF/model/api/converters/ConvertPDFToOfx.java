@@ -51,8 +51,9 @@ public class ConvertPDFToOfx {
     private static final String WARNINGS_HEADER = "X-GPS-Avisos";
 
     // HTTP/1.1 on purpose: the JDK client defaults to HTTP/2 and, over plain http, sends an
-    // "Upgrade: h2c" request. The ofx service runs on uvicorn, which rejects the upgrade ("Unsupported
-    // upgrade request") and loses the multipart body, answering 422 "arquivo: Field required".
+    // "Upgrade: h2c" request. The ofx service runs on uvicorn, which rejects the upgrade
+    // ("Unsupported upgrade request") and loses the multipart body, answering 422
+    // "arquivo: Field required".
     private final HttpClient httpClient =
             HttpClient.newBuilder()
                     .version(HttpClient.Version.HTTP_1_1)
@@ -108,8 +109,7 @@ public class ConvertPDFToOfx {
             response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
         } catch (IOException e) {
             log.warn("ofx service unreachable at {}: {}", serviceUrl, e.toString());
-            throw serviceFailure(
-                    "O conversor OFX não respondeu. O serviço ofx está no ar?");
+            throw serviceFailure("O conversor OFX não respondeu. O serviço ofx está no ar?");
         }
 
         int status = response.statusCode();
@@ -144,8 +144,8 @@ public class ConvertPDFToOfx {
 
     /**
      * A plain RuntimeException on purpose. JobExecutorService turns it into a 500 with body
-     * {"error": "Job failed: <message>"}, which the frontend shows; a ResponseStatusException
-     * would show up as 'Job failed: 502 BAD_GATEWAY "..."', status and quotes included.
+     * {"error": "Job failed: <message>"}, which the frontend shows; a ResponseStatusException would
+     * show up as 'Job failed: 502 BAD_GATEWAY "..."', status and quotes included.
      */
     private static RuntimeException serviceFailure(String message) {
         return new IllegalStateException(message);
@@ -192,16 +192,22 @@ public class ConvertPDFToOfx {
             throws IOException {
         String safeName = fileName.replace("\"", "").replace("\r", "").replace("\n", "");
         String head =
-                "--" + boundary + "\r\n"
+                "--"
+                        + boundary
+                        + "\r\n"
                         + "Content-Disposition: form-data; name=\"arquivo\"; filename=\""
                         + safeName
                         + "\"\r\n"
                         + "Content-Type: application/pdf\r\n\r\n";
         String tail =
-                "\r\n--" + boundary + "\r\n"
+                "\r\n--"
+                        + boundary
+                        + "\r\n"
                         + "Content-Disposition: form-data; name=\"exigir_conferencia\"\r\n\r\n"
                         + "true\r\n"
-                        + "--" + boundary + "--\r\n";
+                        + "--"
+                        + boundary
+                        + "--\r\n";
         ByteArrayOutputStream out = new ByteArrayOutputStream(pdf.length + 512);
         out.write(head.getBytes(StandardCharsets.UTF_8));
         out.write(pdf);
