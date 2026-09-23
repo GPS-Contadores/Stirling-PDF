@@ -45,7 +45,7 @@ export const shouldProcessFilesSeparately = (
           parameters.toExtension === "pdfx")) ||
       // PDF to text-like/spreadsheet formats should be one output per input
       (parameters.fromExtension === "pdf" &&
-        ["txt", "rtf", "csv", "xlsx"].includes(parameters.toExtension)) ||
+        ["txt", "rtf", "csv", "xlsx", "ofx"].includes(parameters.toExtension)) ||
       // PDF to CBR conversions (each PDF should generate its own archive)
       (parameters.fromExtension === "pdf" &&
         parameters.toExtension === "cbr") ||
