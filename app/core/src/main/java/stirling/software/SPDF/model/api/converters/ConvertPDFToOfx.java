@@ -1,13 +1,14 @@
 package stirling.software.SPDF.model.api.converters;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -28,37 +29,53 @@ import stirling.software.common.enumeration.ResourceWeight;
 import stirling.software.common.model.api.PDFFile;
 import stirling.software.common.util.WebResponseUtils;
 
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
 /**
- * PDF bank statement to OFX.
+ * PDF bank statement / credit card bill to OFX.
  *
- * <p>Local experiment (GPS-Contadores): the conversion itself lives in a small Python service
- * (the "pdf-para-ofx" container), which reads the statement layout, checks that opening balance
- * plus transactions equals the closing balance, and only then writes the OFX. This controller
- * just forwards the PDF and relays the result, so the balance check stays in one place.
+ * <p>Local experiment (GPS-Contadores): the conversion is done by pdf2ofx, from the
+ * GPS-Contadores/automacoes-contabil repository, running as a sibling container. It picks the
+ * bank layout parser, checks that the transactions add up to the printed balance, and writes the
+ * OFX 1.0.2 dialect that Questor imports. This controller only forwards the PDF and relays the
+ * result, so none of that logic is duplicated here.
  */
 @Slf4j
 @ConvertApi
 public class ConvertPDFToOfx {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(180);
+    private static final ObjectMapper JSON = new ObjectMapper();
 
+    // HTTP/1.1 on purpose: the JDK client defaults to HTTP/2 and, over plain http, sends an
+    // "Upgrade: h2c" request. pdf2ofx runs on uvicorn, which rejects the upgrade ("Unsupported
+    // upgrade request") and loses the multipart body, answering 422 "arquivo: Field required".
     private final HttpClient httpClient =
-            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+            HttpClient.newBuilder()
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
 
-    // Env var PDFTOOFX_URL (Spring relaxed binding) overrides it.
-    @Value("${pdfToOfx.url:http://pdf-para-ofx:8000}")
+    // Env vars PDFTOOFX_URL / PDFTOOFX_TOKEN (Spring relaxed binding) override these.
+    @Value("${pdfToOfx.url:http://pdf2ofx:8000}")
     private String serviceUrl;
+
+    @Value("${pdfToOfx.token:}")
+    private String serviceToken;
 
     @AutoJobPostMapping(
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
             value = "/pdf/ofx",
             resourceWeight = ResourceWeight.SMALL_WEIGHT)
     @Operation(
-            summary = "Convert a PDF bank statement to OFX",
+            summary = "Convert a PDF bank statement or credit card bill to OFX",
             description =
-                    "Reads a text-based bank statement PDF and returns an OFX 2.2 file. The OFX is"
-                            + " only produced if the opening balance plus the transactions matches"
-                            + " the closing balance. Input:PDF Output:OFX Type:SISO")
+                    "Reads a text-based bank statement or card bill PDF and returns an OFX file"
+                            + " for Questor. The OFX is only produced if the transactions add up"
+                            + " to the balance printed on the document. Input:PDF Output:OFX"
+                            + " Type:SISO")
     public ResponseEntity<byte[]> processPdfToOfx(@ModelAttribute PDFFile file) throws Exception {
         MultipartFile inputFile = file.getFileInput();
         if (inputFile == null || inputFile.isEmpty()) {
@@ -71,25 +88,29 @@ public class ConvertPDFToOfx {
                         ? originalName.substring(0, originalName.lastIndexOf('.'))
                         : originalName;
 
-        URI endpoint = URI.create(stripTrailingSlash(serviceUrl) + "/api/converter");
-        HttpRequest request =
+        String boundary = "----StirlingPdf2Ofx" + UUID.randomUUID().toString().replace("-", "");
+        // Refuse instead of returning an OFX with a warning: pdf2ofx sends warnings in response
+        // headers, which the Stirling UI never shows, so a mismatched OFX would look fine.
+        byte[] body = multipart(boundary, originalName, inputFile.getBytes());
+
+        URI endpoint = URI.create(stripTrailingSlash(serviceUrl) + "/pdf-para-ofx");
+        HttpRequest.Builder request =
                 HttpRequest.newBuilder(endpoint)
                         .timeout(TIMEOUT)
-                        .header("Content-Type", "application/pdf")
-                        .header(
-                                "X-Filename",
-                                URLEncoder.encode(originalName, StandardCharsets.UTF_8))
-                        .POST(HttpRequest.BodyPublishers.ofByteArray(inputFile.getBytes()))
-                        .build();
+                        .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(body));
+        if (serviceToken != null && !serviceToken.isBlank()) {
+            request.header("Authorization", "Bearer " + serviceToken.trim());
+        }
 
         HttpResponse<byte[]> response;
         try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
         } catch (IOException e) {
-            log.warn("PDF to OFX service unreachable at {}: {}", serviceUrl, e.toString());
+            log.warn("pdf2ofx unreachable at {}: {}", serviceUrl, e.toString());
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
-                    "O serviço PDF→OFX não respondeu. O container pdf-para-ofx está no ar?");
+                    "O conversor pdf2ofx não respondeu. O container pdf2ofx está no ar?");
         }
 
         int status = response.statusCode();
@@ -97,19 +118,60 @@ public class ConvertPDFToOfx {
             return WebResponseUtils.bytesToWebResponse(
                     response.body(), baseName + ".ofx", MediaType.valueOf("application/x-ofx"));
         }
-
-        String message = new String(response.body(), StandardCharsets.UTF_8).trim();
-        if (status == 400 || status == 422) {
-            // The statement itself is the problem (unknown layout, balance does not match).
-            // IllegalArgumentException because JobExecutorService only lets that (and
-            // BaseAppException causes) through; anything else becomes a generic 500. The
-            // global handler turns it into a 400 ProblemDetail whose "detail" is the message.
-            // Not 422: the frontend treats 422 as "corrupted file" and hides the reason.
-            throw new IllegalArgumentException(message.isEmpty() ? "OFX não gerado." : message);
+        if (status == 422 || status == 413) {
+            // The document itself is the problem (unknown layout, scanned PDF, password,
+            // balance mismatch, too large). IllegalArgumentException because JobExecutorService
+            // only lets that through; anything else becomes a generic 500. The global handler
+            // turns it into a 400 ProblemDetail whose "detail" the frontend shows.
+            throw new IllegalArgumentException("OFX não gerado: " + reason(response.body()));
         }
-        log.warn("PDF to OFX service returned HTTP {}: {}", status, message);
+        if (status == 401) {
+            log.warn("pdf2ofx rejected the token (check PDFTOOFX_TOKEN / PDF2OFX_TOKEN)");
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY, "O pdf2ofx recusou o token de acesso do Stirling.");
+        }
+        log.warn("pdf2ofx returned HTTP {}", status);
         throw new ResponseStatusException(
-                HttpStatus.BAD_GATEWAY, "O serviço PDF→OFX falhou (HTTP " + status + ").");
+                HttpStatus.BAD_GATEWAY, "O conversor pdf2ofx falhou (HTTP " + status + ").");
+    }
+
+    /** pdf2ofx answers 422 with {"erro": "..."} and 413 with FastAPI's {"detail": "..."}. */
+    private static String reason(byte[] body) {
+        String text = new String(body, StandardCharsets.UTF_8).trim();
+        try {
+            JsonNode json = JSON.readTree(text);
+            for (String field : new String[] {"erro", "detail"}) {
+                JsonNode value = json.get(field);
+                if (value != null && value.isTextual() && !value.asText().isBlank()) {
+                    return value.asText();
+                }
+            }
+        } catch (JacksonException e) {
+            // Not JSON: fall back to the raw text below.
+        }
+        return text.isEmpty() ? "documento recusado pelo conversor." : text;
+    }
+
+    /** Multipart body for pdf2ofx: the PDF as "arquivo" plus exigir_conferencia=true. */
+    private static byte[] multipart(String boundary, String fileName, byte[] pdf)
+            throws IOException {
+        String safeName = fileName.replace("\"", "").replace("\r", "").replace("\n", "");
+        String head =
+                "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"arquivo\"; filename=\""
+                        + safeName
+                        + "\"\r\n"
+                        + "Content-Type: application/pdf\r\n\r\n";
+        String tail =
+                "\r\n--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"exigir_conferencia\"\r\n\r\n"
+                        + "true\r\n"
+                        + "--" + boundary + "--\r\n";
+        ByteArrayOutputStream out = new ByteArrayOutputStream(pdf.length + 512);
+        out.write(head.getBytes(StandardCharsets.UTF_8));
+        out.write(pdf);
+        out.write(tail.getBytes(StandardCharsets.UTF_8));
+        return out.toByteArray();
     }
 
     private static String stripTrailingSlash(String url) {
