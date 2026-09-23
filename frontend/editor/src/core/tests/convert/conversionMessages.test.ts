@@ -51,10 +51,10 @@ describe("conversionErrorMessage", () => {
 
   test('reads the job "error" field and drops the "Job failed: " prefix', async () => {
     const error = blobError({
-      error: "Job failed: O conversor pdf2ofx não respondeu.",
+      error: "Job failed: O conversor OFX não respondeu.",
     });
     expect(await conversionErrorMessage(error)).toBe(
-      "O conversor pdf2ofx não respondeu.",
+      "O conversor OFX não respondeu.",
     );
   });
 

@@ -34,11 +34,13 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * PDF bank statement / credit card bill to OFX.
  *
- * <p>Local experiment (GPS-Contadores): the conversion is done by pdf2ofx, from the
- * GPS-Contadores/automacoes-contabil repository, running as a sibling container. It picks the
- * bank layout parser, checks that the transactions add up to the printed balance, and writes the
- * OFX 1.0.2 dialect that Questor imports. This controller only forwards the PDF and relays the
+ * <p>GPS-Contadores: the conversion is done by the {@code ofx} service (ofx-service/ in
+ * GPS-Contadores/conversor-documentos), running next to Stirling on the private network. It picks
+ * the bank layout parser, checks that the transactions add up to the printed balance, and writes
+ * the OFX 1.0.2 dialect that Questor imports. This controller only forwards the PDF and relays the
  * result, so none of that logic is duplicated here.
+ *
+ * <p>No token: the service is not public and login happens at the edge (oauth2-proxy).
  */
 @Slf4j
 @ConvertApi
@@ -49,7 +51,7 @@ public class ConvertPDFToOfx {
     private static final String WARNINGS_HEADER = "X-GPS-Avisos";
 
     // HTTP/1.1 on purpose: the JDK client defaults to HTTP/2 and, over plain http, sends an
-    // "Upgrade: h2c" request. pdf2ofx runs on uvicorn, which rejects the upgrade ("Unsupported
+    // "Upgrade: h2c" request. The ofx service runs on uvicorn, which rejects the upgrade ("Unsupported
     // upgrade request") and loses the multipart body, answering 422 "arquivo: Field required".
     private final HttpClient httpClient =
             HttpClient.newBuilder()
@@ -57,12 +59,10 @@ public class ConvertPDFToOfx {
                     .connectTimeout(Duration.ofSeconds(10))
                     .build();
 
-    // Env vars PDFTOOFX_URL / PDFTOOFX_TOKEN (Spring relaxed binding) override these.
-    @Value("${pdfToOfx.url:http://pdf2ofx:8000}")
+    // Env var PDFTOOFX_URL (Spring relaxed binding) overrides it. The default is the service
+    // name in docker-compose; on Railway it is http://ofx.railway.internal:8000.
+    @Value("${pdfToOfx.url:http://ofx:8000}")
     private String serviceUrl;
-
-    @Value("${pdfToOfx.token:}")
-    private String serviceToken;
 
     @AutoJobPostMapping(
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -96,23 +96,20 @@ public class ConvertPDFToOfx {
         // and an OFX that does not add up must never reach Questor looking like a normal file.
         byte[] body = multipart(boundary, originalName, inputFile.getBytes());
 
-        URI endpoint = URI.create(stripTrailingSlash(serviceUrl) + "/pdf-para-ofx");
+        URI endpoint = URI.create(stripTrailingSlash(serviceUrl) + "/ofx/api/converter");
         HttpRequest.Builder request =
                 HttpRequest.newBuilder(endpoint)
                         .timeout(TIMEOUT)
                         .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                         .POST(HttpRequest.BodyPublishers.ofByteArray(body));
-        if (serviceToken != null && !serviceToken.isBlank()) {
-            request.header("Authorization", "Bearer " + serviceToken.trim());
-        }
 
         HttpResponse<byte[]> response;
         try {
             response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
         } catch (IOException e) {
-            log.warn("pdf2ofx unreachable at {}: {}", serviceUrl, e.toString());
+            log.warn("ofx service unreachable at {}: {}", serviceUrl, e.toString());
             throw serviceFailure(
-                    "O conversor pdf2ofx não respondeu. O container pdf2ofx está no ar?");
+                    "O conversor OFX não respondeu. O serviço ofx está no ar?");
         }
 
         int status = response.statusCode();
@@ -122,7 +119,7 @@ public class ConvertPDFToOfx {
                             response.body(),
                             baseName + ".ofx",
                             MediaType.valueOf("application/x-ofx"));
-            // pdf2ofx sends its warnings (e.g. "bank not identified in the header") as
+            // The ofx service sends its warnings (e.g. "bank not identified in the header") as
             // base64(JSON array) in X-GPS-Avisos. Relay it so the Convert tool can show them;
             // dropping it would hand the user an OFX with a warning nobody ever sees.
             String warnings = response.headers().firstValue(WARNINGS_HEADER).orElse("");
@@ -141,12 +138,8 @@ public class ConvertPDFToOfx {
             // turns it into a 400 ProblemDetail whose "detail" the frontend shows.
             throw new IllegalArgumentException("OFX não gerado: " + reason(response.body()));
         }
-        if (status == 401) {
-            log.warn("pdf2ofx rejected the token (check PDFTOOFX_TOKEN / PDF2OFX_TOKEN)");
-            throw serviceFailure("O pdf2ofx recusou o token de acesso do Stirling.");
-        }
-        log.warn("pdf2ofx returned HTTP {}", status);
-        throw serviceFailure("O conversor pdf2ofx falhou (HTTP " + status + ").");
+        log.warn("ofx service returned HTTP {}", status);
+        throw serviceFailure("O conversor OFX falhou (HTTP " + status + ").");
     }
 
     /**
@@ -159,7 +152,7 @@ public class ConvertPDFToOfx {
     }
 
     /**
-     * pdf2ofx answers 422 with {"erro": "..."}, 413 with FastAPI's {"detail": "..."} and a
+     * The ofx service answers 422 with {"erro": "..."}, 413 with FastAPI's {"detail": "..."} and a
      * request validation error with {"detail": [{"msg": "...", "loc": [...]}, ...]}.
      */
     private static String reason(byte[] body) {
@@ -185,7 +178,7 @@ public class ConvertPDFToOfx {
                     }
                 }
                 if (messages.length() > 0) {
-                    return "requisição inválida para o pdf2ofx (" + messages + ").";
+                    return "requisição inválida para o conversor OFX (" + messages + ").";
                 }
             }
         } catch (JacksonException e) {
@@ -194,7 +187,7 @@ public class ConvertPDFToOfx {
         return text.isEmpty() ? "documento recusado pelo conversor." : text;
     }
 
-    /** Multipart body for pdf2ofx: the PDF as "arquivo" plus exigir_conferencia=true. */
+    /** Multipart body for the ofx service: the PDF as "arquivo" plus exigir_conferencia=true. */
     private static byte[] multipart(String boundary, String fileName, byte[] pdf)
             throws IOException {
         String safeName = fileName.replace("\"", "").replace("\r", "").replace("\n", "");

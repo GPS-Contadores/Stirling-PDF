@@ -3175,6 +3175,7 @@ multiple = "Multiple"
 optimizeForEbook = "Optimize PDF for ebook readers (uses Ghostscript)"
 output = "Output"
 outputFormat = "Output Format"
+partialFailureTitle = "{{failed}} of {{total}} files were not converted"
 pdfaDigitalSignatureWarning = "The PDF contains a digital signature. This will be removed in the next step."
 pdfaNote = "PDF/A-1b is more compatible, PDF/A-2b supports more features, PDF/A-3b supports embedded files."
 pdfaOptions = "PDF/A Options"
@@ -3194,6 +3195,7 @@ svgVectorNote = "SVG files are rendered as vector graphics for crisp output at a
 tags = "transform,change,convert,PDF to Word,PDF to Excel,PDF to image,Word to PDF,Excel to PDF,PowerPoint to PDF,HTML to PDF,export,import,file conversion,format change,save as"
 targetFormatPlaceholder = "Target format"
 title = "Convert"
+warningsTitle = "{{file}}: check before importing"
 webOptions = "Web to PDF Options"
 zoomLevel = "Zoom Level"
 
@@ -5703,6 +5705,11 @@ title = "PDF to Image"
 header = "PDF To Markdown"
 tags = "markup,web-content,transformation,convert,md"
 title = "PDF To Markdown"
+
+[PDFToOFX]
+header = "PDF to OFX"
+tags = "bank,statement,ofx,finance,accounting,convert"
+title = "PDF to OFX (bank statement)"
 
 [pdfToPDFA]
 header = "PDF To PDF/A"
