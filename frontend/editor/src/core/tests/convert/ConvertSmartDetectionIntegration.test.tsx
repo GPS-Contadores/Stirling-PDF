@@ -346,11 +346,14 @@ describe("Convert Tool - Smart Detection Integration Tests", () => {
         );
       });
 
+      // Files converted one by one report failures together, so the generic
+      // error toast is suppressed for each request.
       expect(mockedApiClient.post).toHaveBeenCalledWith(
         "/api/v1/convert/file/pdf",
         expect.any(FormData),
         {
           responseType: "blob",
+          suppressErrorToast: true,
         },
       );
     });
@@ -400,11 +403,14 @@ describe("Convert Tool - Smart Detection Integration Tests", () => {
         );
       });
 
+      // Files converted one by one report failures together, so the generic
+      // error toast is suppressed for each request.
       expect(mockedApiClient.post).toHaveBeenCalledWith(
         "/api/v1/convert/html/pdf",
         expect.any(FormData),
         {
           responseType: "blob",
+          suppressErrorToast: true,
         },
       );
 

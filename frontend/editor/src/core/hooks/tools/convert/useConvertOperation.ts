@@ -322,6 +322,10 @@ export const convertProcessor = async (
         const formData = buildConvertFormData(parameters, [file]);
         const response = await apiClient.post(endpoint, formData, {
           responseType: "blob",
+          // Failures here are collected and reported together below, with the
+          // file name and the reason; the generic "Request error" toast would
+          // only add a duplicate that names neither.
+          suppressErrorToast: true,
         });
 
         const convertedFile = createFileFromResponse(
