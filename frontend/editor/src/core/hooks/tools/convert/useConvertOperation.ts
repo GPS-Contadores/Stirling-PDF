@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { createElement, useCallback, useMemo } from "react";
 import apiClient from "@app/services/apiClient";
 import { useTranslation } from "react-i18next";
 import {
@@ -6,6 +6,9 @@ import {
   defaultParameters,
 } from "@app/hooks/tools/convert/useConvertParameters";
 import { createFileFromApiResponse } from "@app/utils/fileResponseUtils";
+import { alert } from "@app/components/toast";
+import { normalizeAxiosErrorData } from "@app/services/errorUtils";
+import i18n from "@app/i18n";
 import {
   useToolOperation,
   ToolType,
@@ -45,7 +48,9 @@ export const shouldProcessFilesSeparately = (
           parameters.toExtension === "pdfx")) ||
       // PDF to text-like/spreadsheet formats should be one output per input
       (parameters.fromExtension === "pdf" &&
-        ["txt", "rtf", "csv", "xlsx", "ofx"].includes(parameters.toExtension)) ||
+        ["txt", "rtf", "csv", "xlsx", "ofx"].includes(
+          parameters.toExtension,
+        )) ||
       // PDF to CBR conversions (each PDF should generate its own archive)
       (parameters.fromExtension === "pdf" &&
         parameters.toExtension === "cbr") ||
@@ -226,6 +231,66 @@ export const createFileFromResponse = (
   return createFileFromApiResponse(responseData, headers, fallbackFilename);
 };
 
+/**
+ * Readable reason for a failed conversion request. Tool requests use
+ * responseType "blob", so the backend's ProblemDetail (`detail`) or job error
+ * (`error`) arrives as a Blob and has to be read first.
+ */
+export const conversionErrorMessage = async (error: any): Promise<string> => {
+  try {
+    const normalized = await normalizeAxiosErrorData(error?.response?.data);
+    const message =
+      typeof normalized === "string"
+        ? normalized
+        : (normalized?.detail ?? normalized?.error);
+    if (typeof message === "string" && message.trim()) {
+      return message.replace(/^Job failed: /, "").trim();
+    }
+  } catch (_e) {
+    void _e;
+  }
+  return error?.message || "Conversion failed";
+};
+
+/**
+ * Warnings a converter attached to a successful response, as base64(JSON
+ * array of strings) in X-GPS-Avisos (sent by the PDF → OFX converter, e.g.
+ * "bank not identified in the header"). Returns [] when there are none.
+ */
+export const conversionWarnings = (headers: any): string[] => {
+  const raw = headers?.["x-gps-avisos"];
+  if (typeof raw !== "string" || !raw) return [];
+  try {
+    const bytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
+    const parsed = JSON.parse(new TextDecoder().decode(bytes));
+    return Array.isArray(parsed)
+      ? parsed.filter((w): w is string => typeof w === "string" && !!w.trim())
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+// Toast bodies don't preserve line breaks, so several messages go in a list.
+const messageList = (items: string[]) =>
+  createElement(
+    "ul",
+    { style: { margin: 0, paddingLeft: "1.1rem" } },
+    items.map((item, i) => createElement("li", { key: i }, item)),
+  );
+
+const showConversionWarnings = (fileName: string, warnings: string[]) => {
+  if (warnings.length === 0) return;
+  alert({
+    alertType: "warning",
+    title: i18n.t("convert.warningsTitle", "{{file}}: check before importing", {
+      file: fileName,
+    }),
+    body: messageList(warnings),
+    isPersistentPopup: true,
+  });
+};
+
 // Static processor that can be used by both the hook and automation executor
 export const convertProcessor = async (
   parameters: ConvertParameters,
@@ -251,6 +316,7 @@ export const convertProcessor = async (
 
   if (isSeparateProcessing) {
     // Individual processing for complex cases (PDF→image, smart detection, etc.)
+    const failures: { name: string; reason: string }[] = [];
     for (const file of selectedFiles) {
       try {
         const formData = buildConvertFormData(parameters, [file]);
@@ -266,9 +332,34 @@ export const convertProcessor = async (
         );
 
         processedFiles.push(convertedFile);
+        showConversionWarnings(file.name, conversionWarnings(response.headers));
       } catch (error) {
         console.warn(`Failed to convert file ${file.name}:`, error);
+        failures.push({
+          name: file.name,
+          reason: await conversionErrorMessage(error),
+        });
       }
+    }
+
+    // A failed file used to vanish with only a console warning: the user got
+    // the other outputs and no sign that one was missing (a bank statement
+    // silently left out of a batch, for PDF → OFX). Say which and why.
+    const failureList = failures.map((f) => `${f.name}: ${f.reason}`);
+    if (failures.length > 0 && processedFiles.length === 0) {
+      throw new Error(failureList.join(" | "));
+    }
+    if (failures.length > 0) {
+      alert({
+        alertType: "error",
+        title: i18n.t(
+          "convert.partialFailureTitle",
+          "{{failed}} of {{total}} files were not converted",
+          { failed: failures.length, total: selectedFiles.length },
+        ),
+        body: messageList(failureList),
+        isPersistentPopup: true,
+      });
     }
   } else {
     // Batch processing for simple cases (image→PDF combine)
@@ -287,6 +378,7 @@ export const convertProcessor = async (
       actualToExtension === "pdfa" ? "pdfx" : parameters.toExtension,
     );
     processedFiles.push(convertedFile);
+    showConversionWarnings(baseFilename, conversionWarnings(response.headers));
   }
 
   // When batch processing multiple files into one output (e.g., 3 images → 1 PDF),

@@ -20,10 +20,7 @@ import {
   FileId,
   StirlingFileStub,
 } from "@app/types/fileContext";
-import {
-  FILE_EVENTS,
-  normalizeAxiosErrorData,
-} from "@app/services/errorUtils";
+import { FILE_EVENTS, normalizeAxiosErrorData } from "@app/services/errorUtils";
 import { zipFileService } from "@app/services/zipFileService";
 import { getFilenameWithoutExtension } from "@app/utils/fileUtils";
 import {
@@ -606,7 +603,7 @@ export const useToolOperation = <TParams>(
                 ? normalized
                 : (normalized?.detail ?? normalized?.error);
             if (typeof detail === "string" && detail.trim()) {
-              error.response.data = detail;
+              error.response.data = detail.replace(/^Job failed: /, "").trim();
             }
           }
         } catch (_e) {

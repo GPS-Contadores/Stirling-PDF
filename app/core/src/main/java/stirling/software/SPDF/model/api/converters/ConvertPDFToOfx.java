@@ -11,12 +11,10 @@ import java.time.Duration;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.server.ResponseStatusException;
 
 import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
@@ -48,6 +46,7 @@ public class ConvertPDFToOfx {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(180);
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String WARNINGS_HEADER = "X-GPS-Avisos";
 
     // HTTP/1.1 on purpose: the JDK client defaults to HTTP/2 and, over plain http, sends an
     // "Upgrade: h2c" request. pdf2ofx runs on uvicorn, which rejects the upgrade ("Unsupported
@@ -83,14 +82,18 @@ public class ConvertPDFToOfx {
         }
 
         String originalName = Filenames.toSimpleFileName(inputFile.getOriginalFilename());
+        if (originalName == null || originalName.isBlank()) {
+            originalName = "extrato.pdf";
+        }
         String baseName =
                 originalName.contains(".")
                         ? originalName.substring(0, originalName.lastIndexOf('.'))
                         : originalName;
 
         String boundary = "----StirlingPdf2Ofx" + UUID.randomUUID().toString().replace("-", "");
-        // Refuse instead of returning an OFX with a warning: pdf2ofx sends warnings in response
-        // headers, which the Stirling UI never shows, so a mismatched OFX would look fine.
+        // exigir_conferencia=true: a balance mismatch is refused, not downgraded to a warning.
+        // Warnings are relayed to the UI (see X-GPS-Avisos below), but a toast is easy to miss,
+        // and an OFX that does not add up must never reach Questor looking like a normal file.
         byte[] body = multipart(boundary, originalName, inputFile.getBytes());
 
         URI endpoint = URI.create(stripTrailingSlash(serviceUrl) + "/pdf-para-ofx");
@@ -108,15 +111,28 @@ public class ConvertPDFToOfx {
             response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
         } catch (IOException e) {
             log.warn("pdf2ofx unreachable at {}: {}", serviceUrl, e.toString());
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY,
+            throw serviceFailure(
                     "O conversor pdf2ofx não respondeu. O container pdf2ofx está no ar?");
         }
 
         int status = response.statusCode();
         if (status == 200) {
-            return WebResponseUtils.bytesToWebResponse(
-                    response.body(), baseName + ".ofx", MediaType.valueOf("application/x-ofx"));
+            ResponseEntity<byte[]> ofx =
+                    WebResponseUtils.bytesToWebResponse(
+                            response.body(),
+                            baseName + ".ofx",
+                            MediaType.valueOf("application/x-ofx"));
+            // pdf2ofx sends its warnings (e.g. "bank not identified in the header") as
+            // base64(JSON array) in X-GPS-Avisos. Relay it so the Convert tool can show them;
+            // dropping it would hand the user an OFX with a warning nobody ever sees.
+            String warnings = response.headers().firstValue(WARNINGS_HEADER).orElse("");
+            if (!warnings.isBlank() && warnings.matches("[A-Za-z0-9+/=]+")) {
+                return ResponseEntity.status(ofx.getStatusCode())
+                        .headers(ofx.getHeaders())
+                        .header(WARNINGS_HEADER, warnings)
+                        .body(ofx.getBody());
+            }
+            return ofx;
         }
         if (status == 422 || status == 413) {
             // The document itself is the problem (unknown layout, scanned PDF, password,
@@ -127,15 +143,25 @@ public class ConvertPDFToOfx {
         }
         if (status == 401) {
             log.warn("pdf2ofx rejected the token (check PDFTOOFX_TOKEN / PDF2OFX_TOKEN)");
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY, "O pdf2ofx recusou o token de acesso do Stirling.");
+            throw serviceFailure("O pdf2ofx recusou o token de acesso do Stirling.");
         }
         log.warn("pdf2ofx returned HTTP {}", status);
-        throw new ResponseStatusException(
-                HttpStatus.BAD_GATEWAY, "O conversor pdf2ofx falhou (HTTP " + status + ").");
+        throw serviceFailure("O conversor pdf2ofx falhou (HTTP " + status + ").");
     }
 
-    /** pdf2ofx answers 422 with {"erro": "..."} and 413 with FastAPI's {"detail": "..."}. */
+    /**
+     * A plain RuntimeException on purpose. JobExecutorService turns it into a 500 with body
+     * {"error": "Job failed: <message>"}, which the frontend shows; a ResponseStatusException
+     * would show up as 'Job failed: 502 BAD_GATEWAY "..."', status and quotes included.
+     */
+    private static RuntimeException serviceFailure(String message) {
+        return new IllegalStateException(message);
+    }
+
+    /**
+     * pdf2ofx answers 422 with {"erro": "..."}, 413 with FastAPI's {"detail": "..."} and a
+     * request validation error with {"detail": [{"msg": "...", "loc": [...]}, ...]}.
+     */
     private static String reason(byte[] body) {
         String text = new String(body, StandardCharsets.UTF_8).trim();
         try {
@@ -144,6 +170,22 @@ public class ConvertPDFToOfx {
                 JsonNode value = json.get(field);
                 if (value != null && value.isTextual() && !value.asText().isBlank()) {
                     return value.asText();
+                }
+            }
+            JsonNode detail = json.get("detail");
+            if (detail != null && detail.isArray() && !detail.isEmpty()) {
+                StringBuilder messages = new StringBuilder();
+                for (JsonNode item : detail) {
+                    JsonNode msg = item.get("msg");
+                    if (msg != null && msg.isTextual()) {
+                        if (messages.length() > 0) {
+                            messages.append("; ");
+                        }
+                        messages.append(msg.asText());
+                    }
+                }
+                if (messages.length() > 0) {
+                    return "requisição inválida para o pdf2ofx (" + messages + ").";
                 }
             }
         } catch (JacksonException e) {
