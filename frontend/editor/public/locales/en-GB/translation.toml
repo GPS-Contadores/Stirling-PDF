@@ -5704,6 +5704,11 @@ header = "PDF To Markdown"
 tags = "markup,web-content,transformation,convert,md"
 title = "PDF To Markdown"
 
+[PDFToOFX]
+header = "PDF to OFX"
+tags = "bank,statement,ofx,finance,accounting,convert"
+title = "PDF to OFX (bank statement)"
+
 [pdfToPDFA]
 header = "PDF To PDF/A"
 tags = "archive,long-term,standard,conversion,storage,preservation"

@@ -366,6 +366,7 @@ public class EndpointConfiguration {
         addEndpointToGroup("Convert", "markdown-to-pdf");
         addEndpointToGroup("Convert", "pdf-to-csv");
         addEndpointToGroup("Convert", "pdf-to-markdown");
+        addEndpointToGroup("Convert", "pdf-to-ofx");
         addEndpointToGroup("Convert", "eml-to-pdf");
         addEndpointToGroup("Convert", "pdf-to-epub");
         // Backend-only endpoints (not in frontend tool registry)
