@@ -505,3 +505,82 @@ Before writing or editing Spring / Jackson / JDK code:
 Same goes for Jackson 3's API surface (renamed `ObjectMapper` builder methods, new
 `tools.jackson.databind` namespace) and JDK 25 preview features. Ground your code in this repo's
 actual imports, not what worked three years ago.
+
+<!-- gps:governanca:inicio -->
+<!--
+  Bloco de governança da org GPS-Contadores.
+
+  FONTE ÚNICA: GPS-Contadores/.github → templates/governanca-agentes.md
+  Propagado por bin/init-project.sh e bin/adopt-existing.sh, que substituem o
+  conteúdo entre os marcadores. Editar aqui não adianta: a próxima propagação
+  desfaz. Mude na fonte, por PR, e a mudança chega a todos os repositórios.
+-->
+
+## Regras de engenharia da GPS
+
+### Antes de começar
+
+- **Toda mudança nasce de uma issue.** Sem issue, não há branch.
+- **Sincronize antes de ramificar:**
+
+  ```bash
+  git fetch origin && git switch main && git pull
+  ```
+
+  Só então crie a branch. Um clone parado há dias reintroduz o que já foi
+  corrigido, e o git **não acusa**: se as duas edições caírem em posições
+  diferentes do arquivo não há conflito de texto, o merge passa limpo e o
+  defeito só aparece no teste — quando aparece.
+- **Consulte a memória** (`memory_query`) por armadilhas já registradas neste
+  projeto antes de alterar arquivos.
+
+### Branch e PR
+
+- **Branch nomeada por tipo e descrição:** `feat/<desc>`, `fix/<desc>`,
+  `chore/<desc>`, `docs/<desc>`, `refactor/<desc>`, `test/<desc>`. É
+  **descrição**, não número de issue — `fix/retry-de-conexao`, não
+  `fix/issue-61`. Nunca commite direto na `main`.
+- Se a branch em que você está não seguir esse padrão — inclusive uma criada por
+  ferramenta antes de você começar —, renomeie antes de abrir o PR:
+  `git branch -m <tipo>/<desc>`. Sem isso o PR Gate reprova.
+- **`Closes #N` no corpo do PR.** É o que fecha a issue e move o card. Sem isso
+  o PR Gate reprova.
+- **Um assunto por PR.** Dois assuntos são dois PRs. PR grande não é entrega
+  maior — é revisão que não acontece e reversão que não existe.
+
+### Antes de pedir merge
+
+- **Rode a verificação do projeto localmente e cole a saída real** no test plan.
+  Test plan é o que você rodou, não o que você espera que aconteça.
+- **Check vermelho não se pede merge, se lê.** Abra o log do check que falhou.
+  Se alguma falha for esperada, diga **qual teste** falha e por quê, pelo nome —
+  explicação genérica que não corresponde à falha observada é pior que silêncio,
+  porque convence o revisor a não olhar.
+- **Não entendeu a falha? Diga isso no PR.** Ficar parado é barato. `main`
+  vermelha para todo mundo.
+
+### Permissão e merge
+
+- **Só o líder técnico mescla e só ele tem push na `main`.** `write` num
+  repositório só existe onde a `main` tem ruleset ativo (hoje, só os
+  repositórios públicos). Em repositório privado a contribuição é por **fork +
+  PR**: `gh repo fork GPS-Contadores/<repo> --clone`, branch no fork, PR contra
+  a `main` do repositório da org.
+- Encontrou-se com `write` num privado? Não use para push direto: abra a PR
+  mesmo assim e avise o líder — a permissão está errada, não a regra.
+
+### Nunca
+
+- Commitar `.env`, `.mcp.json`, `.claude/settings.json`, chave privada ou dado de
+  cliente.
+- **Mergear com o gate vermelho.** A organização está no plano Free, onde o
+  GitHub **não** impede merge de PR reprovado em repositório privado. Não existe
+  trava automática: a trava é humana, e é esta linha.
+
+### Ao encontrar uma armadilha
+
+Build quebrando por motivo estranho, API que se comporta fora do documentado,
+número que não bate com a fonte: **registre na memória**. É exatamente o tipo de
+conhecimento que ela existe para guardar, e o único que não se recupera lendo o
+código depois.
+<!-- gps:governanca:fim -->
