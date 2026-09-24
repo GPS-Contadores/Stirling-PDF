@@ -22,6 +22,10 @@ import { useFileHandler } from "@app/hooks/useFileHandler";
 import { useAuth } from "@app/auth/UseSession";
 import { useProfilePictureUrl } from "@app/hooks/useProfilePictureUrl";
 import {
+  useProxyIdentity,
+  PROXY_SIGN_OUT_PATH,
+} from "@app/hooks/useProxyIdentity";
+import {
   useIndexedDB,
   useIndexedDBRevision,
 } from "@app/contexts/IndexedDBContext";
@@ -38,6 +42,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import AddIcon from "@mui/icons-material/Add";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import SettingsIcon from "@mui/icons-material/Settings";
+import LogoutIcon from "@mui/icons-material/Logout";
 import type { FileId } from "@app/types/file";
 import { FileItem } from "@app/components/shared/FileSidebarFileItem";
 import BulkUploadToServerModal from "@app/components/shared/BulkUploadToServerModal";
@@ -191,10 +196,16 @@ const FileSidebar = forwardRef<HTMLDivElement, FileSidebarProps>(
     // Each auth layer derives its own displayName from its native user shape.
     // Fall back to the proprietary REST endpoint only when the auth
     // context yields nothing - then to "User" as a generic last resort.
+    // With login disabled the auth context only knows an anonymous "User";
+    // an oauth2-proxy at the edge (GPS deploy) knows the real person.
     const { displayName: authDisplayName, isAnonymous } = useAuth();
+    const proxyIdentity = useProxyIdentity(config?.enableLogin === false);
     const [accountUsername, setAccountUsername] = useState<string | null>(null);
     const displayName =
-      authDisplayName ?? accountUsername ?? t("auth.displayName.user", "User");
+      proxyIdentity?.displayName ??
+      authDisplayName ??
+      accountUsername ??
+      t("auth.displayName.user", "User");
 
     const profilePictureUrl = useProfilePictureUrl();
     const [pictureFailed, setPictureFailed] = useState(false);
@@ -1203,7 +1214,10 @@ const FileSidebar = forwardRef<HTMLDivElement, FileSidebarProps>(
               )}
             </div>
             {!collapsed && (
-              <span className="file-sidebar-bottom-name sidebar-content-fade">
+              <span
+                className="file-sidebar-bottom-name sidebar-content-fade"
+                title={proxyIdentity ? displayName : undefined}
+              >
                 {displayName}
               </span>
             )}
@@ -1211,6 +1225,21 @@ const FileSidebar = forwardRef<HTMLDivElement, FileSidebarProps>(
               <div className="file-sidebar-bottom-settings">
                 <SettingsIcon sx={{ fontSize: "1.1rem" }} />
               </div>
+            )}
+            {proxyIdentity && !collapsed && (
+              // Plain link: sign_out is a proxy route, outside the SPA router.
+              // Stop propagation so the click doesn't also open settings.
+              <a
+                href={PROXY_SIGN_OUT_PATH}
+                className="file-sidebar-bottom-signout"
+                aria-label={t("fileSidebar.signOut", "Sign out")}
+                title={t("fileSidebar.signOut", "Sign out")}
+                data-testid="proxy-sign-out"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <LogoutIcon sx={{ fontSize: "1.1rem" }} />
+              </a>
             )}
           </div>
         </Tooltip>

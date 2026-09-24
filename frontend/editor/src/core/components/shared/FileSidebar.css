@@ -480,6 +480,28 @@
   margin-left: auto;
 }
 
+.file-sidebar-bottom-signout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  text-decoration: none;
+}
+
+.file-sidebar-bottom-signout:hover {
+  color: var(--text-primary);
+  background-color: var(--hover-bg);
+}
+
+.file-sidebar-bottom-signout:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
 .file-sidebar[data-collapsed="true"] .file-sidebar-bottom-settings {
   width: 32px;
   height: 32px;
