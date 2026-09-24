@@ -1,0 +1,125 @@
+/* ============================================================
+   GPS Documentos — tema da marca GPS Contadores
+   Fonte: "GPS Contadores Design System" (Claude Design),
+   colors_and_type.css e design.md.
+
+   Tudo o que é da GPS fica neste arquivo, carregado depois do
+   theme.css: sobrescreve variáveis em vez de editar o arquivo do
+   upstream, para a sincronização com o Stirling não conflitar.
+
+   Azul é da Gestão (marca-irmã), não da GPS — por isso os estados
+   de seleção/ativo que o Stirling pinta de azul viram laranja aqui.
+   Cores de categoria de ferramenta ficam como estão: são
+   categóricas, não de marca.
+   ============================================================ */
+
+:root {
+  /* Marca */
+  --gps-orange: #e3611a;
+  --gps-orange-hover: #ed771c;
+  --gps-orange-light: #f4ac7c;
+  --gps-orange-pale: #f8cfb4;
+  --gps-gray: #9d9d9c;
+
+  --gps-font-sans:
+    "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+
+  /* Escala primary (10 tons) a partir do laranja. Os quatro tons da
+     marca entram exatos: pálido 200, claro 300, hover 500, base 600.
+     O Mantine usa o 600 como cor cheia (primaryShade 6). */
+  --color-primary-50: #fdf4ef;
+  --color-primary-100: #fae8de;
+  --color-primary-200: #f8cfb4;
+  --color-primary-300: #f4ac7c;
+  --color-primary-400: #ec8751;
+  --color-primary-500: #ed771c;
+  --color-primary-600: #e3611a;
+  --color-primary-700: #bc5015;
+  --color-primary-800: #974011;
+  --color-primary-900: #73310d;
+
+  /* Estados de interface que o Stirling pinta de azul */
+  --file-active-bg: rgba(227, 97, 26, 0.1);
+  --pdf-selection-bg: rgba(227, 97, 26, 0.2);
+  --pdf-selection-ring: rgba(227, 97, 26, 0.18);
+  --pdf-light-accent: 227 97 26;
+  --accent-interactive: var(--gps-orange);
+  --header-selected-bg: var(--gps-orange);
+  --card-selected-border: var(--gps-orange);
+  --modal-nav-item-active: var(--gps-orange);
+  --modal-nav-item-active-bg: rgba(227, 97, 26, 0.08);
+  --link-hover-bg: rgba(227, 97, 26, 0.1);
+  --link-hover-border: rgba(227, 97, 26, 0.32);
+  --link-focus-ring: rgba(227, 97, 26, 0.25);
+  --icon-tools-bg: var(--gps-orange);
+
+  /* Tela inicial (landing): gradiente e sombra de CTA do design system */
+  --landing-hero-gradient: linear-gradient(135deg, #e3611a 0%, #ed771c 100%);
+  --landing-inner-paper-bg: var(--color-primary-50);
+  --landing-inner-paper-border: var(--gps-orange-pale);
+  --landing-button-border: var(--gps-orange-pale);
+  --landing-drop-paper-bg: var(--color-primary-50);
+  --landing-drop-inner-paper-bg: var(--color-primary-100);
+  --landing-drop-inner-paper-border: var(--gps-orange-light);
+  --landing-stack-glow-bg: radial-gradient(
+    circle,
+    rgba(227, 97, 26, 0.15) 0%,
+    transparent 70%
+  );
+  --landing-action-primary-shadow-idle:
+    0 4px 20px rgba(227, 97, 26, 0), 0 4px 12px rgba(0, 0, 0, 0);
+  --landing-action-primary-shadow-hover:
+    0 6px 30px rgba(227, 97, 26, 0.6), 0 4px 12px rgba(0, 0, 0, 0.1);
+
+  /* Botão principal do modal de boas-vindas: CTA laranja, não preto */
+  --onboarding-primary-button-bg: var(--gps-orange);
+  --onboarding-primary-button-text: #ffffff;
+}
+
+[data-mantine-color-scheme="dark"] {
+  --pdf-selection-bg: rgba(244, 172, 124, 0.25);
+  --pdf-selection-ring: rgba(244, 172, 124, 0.28);
+  --header-selected-bg: var(--gps-orange);
+  --modal-nav-item-active: var(--gps-orange-light);
+  --modal-nav-item-active-bg: rgba(227, 97, 26, 0.15);
+  --link-hover-bg: rgba(237, 119, 28, 0.14);
+  --link-hover-border: rgba(237, 119, 28, 0.38);
+  --link-focus-ring: rgba(237, 119, 28, 0.3);
+  --onboarding-primary-button-bg: var(--gps-orange);
+  --onboarding-primary-button-text: #ffffff;
+}
+
+/* Hover do botão cheio: a marca clareia (#ed771c), o Mantine escurece
+   (usa o tom seguinte da escala). Seletor mais específico que o
+   :root[data-mantine-color-scheme] que o MantineProvider injeta.
+   O "blue" aponta para a mesma escala (mantineTheme.ts), então os
+   color="blue" herdam o mesmo hover. */
+:root:root[data-mantine-color-scheme] {
+  --mantine-primary-color-filled-hover: var(--gps-orange-hover);
+  --mantine-color-blue-filled-hover: var(--gps-orange-hover);
+}
+
+/* index.css define a fonte do body e é importado depois deste arquivo;
+   "html body" ganha pela especificidade, sem depender da ordem. O botão
+   da barra de links do theme.css fixa "Inter" e entra junto. */
+html body,
+html .pdf-link-toolbar-btn {
+  font-family: var(--gps-font-sans);
+}
+
+/* Wordmark oficial (losango + "GPS", 2,4:1). O do Stirling é só texto
+   (4,5:1), então na mesma altura o da GPS sai com metade da largura.
+   Sobe a altura onde ele é pequeno; a linha do cabeçalho tem 48px. */
+html .file-sidebar-brand-text {
+  height: 32px;
+}
+
+/* No celular o wordmark já traz o losango: o ícone ao lado o repetiria. */
+html .mobile-brand-icon {
+  display: none;
+}
+
+html .mobile-brand-text {
+  height: 2rem;
+}

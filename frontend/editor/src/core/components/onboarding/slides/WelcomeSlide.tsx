@@ -31,7 +31,8 @@ export default function WelcomeSlide(): SlideConfig {
     title: <WelcomeSlideTitle />,
     body: <WelcomeSlideBody />,
     background: {
-      gradientStops: ["#7C3AED", "#EC4899"],
+      // GPS: gradiente de título do design system (--gradient-title)
+      gradientStops: ["#e2611c", "#f4ac7c"],
       circles: UNIFIED_CIRCLE_CONFIG,
     },
   };
