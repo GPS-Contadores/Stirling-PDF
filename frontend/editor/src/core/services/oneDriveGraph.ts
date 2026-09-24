@@ -46,6 +46,48 @@ async function ensureOk(response: Response, what: string): Promise<Response> {
   );
 }
 
+/** Graph has no OneDrive for this user: it is created the first time they open it. */
+export class OneDriveNotProvisionedError extends Error {
+  constructor() {
+    super("OneDrive not provisioned for this user");
+    this.name = "OneDriveNotProvisionedError";
+  }
+}
+
+/**
+ * Site of a OneDrive library from its webUrl: the library is the last path
+ * segment. ".../personal/ana_contoso_com/Documents" →
+ * ".../personal/ana_contoso_com".
+ */
+export function siteUrlFromDriveWebUrl(webUrl: string): string {
+  const url = new URL(webUrl);
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (segments.length < 2) {
+    throw new Error(`Unexpected OneDrive address: ${webUrl}`);
+  }
+  segments.pop();
+  return `${url.origin}/${segments.join("/")}`;
+}
+
+/**
+ * Site of the signed-in user's OneDrive, where the File Picker must be opened.
+ * The root of the "-my" host is the My Site Host collection and holds nobody's
+ * library: opened there, the picker answers "the specified list is invalid".
+ */
+export async function getMyDriveSiteUrl(
+  token: string,
+  fetchImpl: Fetch = fetch,
+): Promise<string> {
+  const response = await fetchImpl(`${GRAPH}/me/drive?$select=webUrl`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 404) throw new OneDriveNotProvisionedError();
+  await ensureOk(response, "OneDrive of the signed-in user");
+  const { webUrl } = (await response.json()) as { webUrl?: string };
+  if (!webUrl) throw new Error("Graph returned the OneDrive without webUrl");
+  return siteUrlFromDriveWebUrl(webUrl);
+}
+
 /**
  * Downloads picked items as Files. Uses the item's pre-authenticated
  * downloadUrl rather than `/content`: `/content` answers with a cross-origin

@@ -3,6 +3,7 @@ import {
   buildPickerOptions,
   handlePickerMessage,
   PickerCommandHandlers,
+  pickerPageUrl,
 } from "@app/services/oneDrivePickerService";
 
 function setup(overrides: Partial<PickerCommandHandlers> = {}) {
@@ -25,6 +26,7 @@ describe("buildPickerOptions", () => {
       multiple: true,
     });
     expect(options.sdk).toBe("8.0");
+    expect(options.entry).toEqual({ oneDrive: { files: {} } });
     expect(options.authentication).toEqual({});
     expect(options.messaging).toEqual({
       origin: "https://docs.example.com",
@@ -49,6 +51,26 @@ describe("buildPickerOptions", () => {
     });
     expect(options.selection.mode).toBe("single");
     expect(options.commands.pick).toEqual({ label: "Salvar aqui" });
+  });
+});
+
+describe("pickerPageUrl", () => {
+  it("opens the picker on the user's site, not on the host root", () => {
+    expect(
+      pickerPageUrl(
+        "https://contoso-my.sharepoint.com/personal/ana_contoso_com",
+      ),
+    ).toBe(
+      "https://contoso-my.sharepoint.com/personal/ana_contoso_com/_layouts/15/FilePicker.aspx",
+    );
+  });
+
+  it("does not double the slash", () => {
+    expect(
+      pickerPageUrl("https://contoso-my.sharepoint.com/personal/ana/"),
+    ).toBe(
+      "https://contoso-my.sharepoint.com/personal/ana/_layouts/15/FilePicker.aspx",
+    );
   });
 });
 

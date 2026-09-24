@@ -5031,6 +5031,7 @@ wrapUp = "That is what is new in V2. Open the <strong>Tours</strong> menu anytim
 [oneDrive]
 downloading = "Downloading…"
 error = "OneDrive error"
+notProvisioned = "Open OneDrive once at office.com and try again."
 openFile = "Open"
 saveHere = "Save here"
 saveToOneDrive = "Save to OneDrive"

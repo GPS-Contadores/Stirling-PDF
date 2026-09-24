@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   downloadPickedItems,
+  getMyDriveSiteUrl,
+  OneDriveNotProvisionedError,
   SIMPLE_UPLOAD_LIMIT,
+  siteUrlFromDriveWebUrl,
   UPLOAD_CHUNK_SIZE,
   uploadFileToFolder,
 } from "@app/services/oneDriveGraph";
@@ -156,5 +159,70 @@ describe("uploadFileToFolder", () => {
       expect(init.headers).not.toHaveProperty("Authorization");
     }
     expect(uploaded.name).toBe("grande.pdf");
+  });
+});
+
+describe("siteUrlFromDriveWebUrl", () => {
+  it("drops the library to get the user's site", () => {
+    expect(
+      siteUrlFromDriveWebUrl(
+        "https://contoso-my.sharepoint.com/personal/ana_contoso_com/Documents",
+      ),
+    ).toBe("https://contoso-my.sharepoint.com/personal/ana_contoso_com");
+  });
+
+  it("ignores a trailing slash", () => {
+    expect(
+      siteUrlFromDriveWebUrl(
+        "https://contoso-my.sharepoint.com/personal/ana_contoso_com/Documents/",
+      ),
+    ).toBe("https://contoso-my.sharepoint.com/personal/ana_contoso_com");
+  });
+
+  it("refuses an address with no site above the library", () => {
+    expect(() =>
+      siteUrlFromDriveWebUrl("https://contoso-my.sharepoint.com/Documents"),
+    ).toThrow("Unexpected OneDrive address");
+  });
+});
+
+describe("getMyDriveSiteUrl", () => {
+  it("asks Graph for the signed-in user's drive and returns its site", async () => {
+    const fetchMock = vi.fn(async () =>
+      json({
+        webUrl:
+          "https://contoso-my.sharepoint.com/personal/ana_contoso_com/Documents",
+      }),
+    );
+
+    const site = await getMyDriveSiteUrl(
+      "graph-token",
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(`${GRAPH}/me/drive?$select=webUrl`, {
+      headers: { Authorization: "Bearer graph-token" },
+    });
+    expect(site).toBe(
+      "https://contoso-my.sharepoint.com/personal/ana_contoso_com",
+    );
+  });
+
+  it("reports a OneDrive that was never provisioned on 404", async () => {
+    const fetchMock = vi.fn(async () =>
+      json({ error: { code: "itemNotFound", message: "Not found" } }, 404),
+    );
+    await expect(
+      getMyDriveSiteUrl("t", fetchMock as unknown as typeof fetch),
+    ).rejects.toBeInstanceOf(OneDriveNotProvisionedError);
+  });
+
+  it("surfaces other Graph errors as they are", async () => {
+    const fetchMock = vi.fn(async () =>
+      json({ error: { message: "Access denied" } }, 403),
+    );
+    await expect(
+      getMyDriveSiteUrl("t", fetchMock as unknown as typeof fetch),
+    ).rejects.toThrow("HTTP 403 — Access denied");
   });
 });
