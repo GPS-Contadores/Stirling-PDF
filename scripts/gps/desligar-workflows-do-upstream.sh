@@ -74,6 +74,14 @@ else
 fi
 echo
 
+# O rótulo dos não registrados diz a verdade sobre a trava 1, lida da API (no
+# dry-run ou quando ela foi pulada, pode não estar ativa).
+if [[ "$(gh api "repos/$REPO/actions/permissions" --jq .allowed_actions)" == selected ]]; then
+  sem_registro="barrado pela trava 1"
+else
+  sem_registro="CONTINUA LIGADO: trava 1 inativa"
+fi
+
 # --- Trava 2: desligar os já registrados -------------------------------------
 
 desligados=0 ja_desligados=0 nao_registrados=0 mantidos=0 falhas=0
@@ -87,7 +95,7 @@ for arquivo in "${arquivos[@]}"; do
   # 404 = nunca rodou, e a API não desliga. O gh escreve o corpo do erro no
   # stdout, por isso o valor é substituído em vez de concatenado.
   if ! estado=$(gh api "repos/$REPO/actions/workflows/$arquivo" --jq .state 2>/dev/null); then
-    echo "não registrado  $arquivo (barrado pela trava 1)"
+    echo "não registrado  $arquivo ($sem_registro)"
     nao_registrados=$((nao_registrados + 1))
     continue
   fi
