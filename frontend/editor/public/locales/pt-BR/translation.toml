@@ -5031,6 +5031,7 @@ wrapUp = "Isso é o que há de novo na V2. Abra o menu <strong>Tours</strong> a 
 [oneDrive]
 downloading = "Baixando…"
 error = "Erro no OneDrive"
+notProvisioned = "Abra o OneDrive uma vez em office.com e tente de novo."
 openFile = "Abrir"
 saveHere = "Salvar aqui"
 saveToOneDrive = "Salvar no OneDrive"

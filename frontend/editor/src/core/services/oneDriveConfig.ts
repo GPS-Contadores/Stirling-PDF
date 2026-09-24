@@ -11,7 +11,11 @@ export interface OneDriveConfig {
   clientId: string;
   /** Tenant id or verified domain, e.g. "contoso.onmicrosoft.com". */
   tenant: string;
-  /** Origin of the tenant's OneDrive, e.g. "https://contoso-my.sharepoint.com". */
+  /**
+   * Origin of the tenant's OneDrive, e.g. "https://contoso-my.sharepoint.com".
+   * The picker opens on the user's site under it (".../personal/<user>"),
+   * never on this root; the origin bounds where tokens and messages may go.
+   */
   pickerBaseUrl: string;
 }
 

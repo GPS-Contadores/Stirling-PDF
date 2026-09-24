@@ -3,7 +3,7 @@
  * Microsoft File Picker and save tool results to a folder picked the same way.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { alert } from "@app/components/toast";
 import { getOneDriveConfig } from "@app/services/oneDriveConfig";
@@ -20,6 +20,8 @@ import {
 } from "@app/services/oneDrivePickerService";
 import {
   downloadPickedItems,
+  getMyDriveSiteUrl,
+  OneDriveNotProvisionedError,
   UploadedItem,
   uploadFileToFolder,
 } from "@app/services/oneDriveGraph";
@@ -41,6 +43,8 @@ export function useOneDrivePicker(): UseOneDrivePickerReturn {
   const { t, i18n } = useTranslation();
   const config = useMemo(() => getOneDriveConfig(), []);
   const [isLoading, setIsLoading] = useState(false);
+  // The user's OneDrive site doesn't change within a session.
+  const siteUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (config) {
@@ -53,8 +57,20 @@ export function useOneDrivePicker(): UseOneDrivePickerReturn {
   const pick = useCallback(
     async (mode: PickerMode, multiple: boolean) => {
       if (!config) return [];
+      if (!siteUrlRef.current) {
+        const graphToken = await acquireToken(config, GRAPH_SCOPES);
+        const siteUrl = await getMyDriveSiteUrl(graphToken);
+        // The picker page gets a SharePoint token in its form: only ever
+        // post it to the configured host.
+        if (new URL(siteUrl).origin !== config.pickerBaseUrl) {
+          throw new Error(
+            `OneDrive at ${siteUrl}, outside ${config.pickerBaseUrl}`,
+          );
+        }
+        siteUrlRef.current = siteUrl;
+      }
       return openOneDrivePicker({
-        baseUrl: config.pickerBaseUrl,
+        baseUrl: siteUrlRef.current,
         locale: i18n.language.toLowerCase(),
         mode,
         multiple,
@@ -74,7 +90,15 @@ export function useOneDrivePicker(): UseOneDrivePickerReturn {
       alert({
         alertType: "error",
         title: t("oneDrive.error", "OneDrive error"),
-        body: error instanceof Error ? error.message : String(error),
+        body:
+          error instanceof OneDriveNotProvisionedError
+            ? t(
+                "oneDrive.notProvisioned",
+                "Open OneDrive once at office.com and try again.",
+              )
+            : error instanceof Error
+              ? error.message
+              : String(error),
       });
     },
     [t],

@@ -33,7 +33,8 @@ export interface PickerOptionsInput {
 export function buildPickerOptions(input: PickerOptionsInput) {
   return {
     sdk: "8.0",
-    entry: { oneDrive: {} },
+    // The form of Microsoft's OneDrive for Business samples; opens "My files".
+    entry: { oneDrive: { files: {} } },
     // Present (even empty) means the host supplies tokens; required in an iframe.
     authentication: {},
     messaging: { origin: input.origin, channelId: input.channelId },
@@ -126,14 +127,23 @@ function errorMessage(error: unknown): string {
 }
 
 export interface OpenPickerParams {
+  /**
+   * Site of the user's OneDrive (".../personal/<user>"), not the bare host:
+   * the host root has no library and the picker fails on it.
+   */
   baseUrl: string;
   locale: string;
   mode: PickerMode;
   multiple: boolean;
   pickLabel?: string;
   closeLabel: string;
-  /** Token for `resource`; the first call is for `baseUrl` itself. */
+  /** Token for `resource`; the first call is for the picker's origin. */
   getToken: (resource: string) => Promise<string>;
+}
+
+/** Address of the picker page on the site `baseUrl`. */
+export function pickerPageUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/_layouts/15/FilePicker.aspx`;
 }
 
 /**
@@ -143,11 +153,11 @@ export interface OpenPickerParams {
 export async function openOneDrivePicker(
   params: OpenPickerParams,
 ): Promise<PickedItem[]> {
+  const pickerOrigin = new URL(params.baseUrl).origin;
   // The form carries a token, so fetch it before anything is shown.
-  const initialToken = await params.getToken(params.baseUrl);
+  const initialToken = await params.getToken(pickerOrigin);
 
   const channelId = crypto.randomUUID();
-  const pickerOrigin = new URL(params.baseUrl).origin;
   const theme =
     document.documentElement.getAttribute("data-mantine-color-scheme") ===
     "dark"
@@ -224,7 +234,7 @@ export async function openOneDrivePicker(
       locale: params.locale,
     });
     postTokenForm(
-      `${pickerOrigin}/_layouts/15/FilePicker.aspx?${query}`,
+      `${pickerPageUrl(params.baseUrl)}?${query}`,
       overlay.iframe.name,
       initialToken,
     );
