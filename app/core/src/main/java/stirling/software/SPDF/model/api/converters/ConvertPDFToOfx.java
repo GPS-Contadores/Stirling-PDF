@@ -8,9 +8,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -48,7 +51,17 @@ public class ConvertPDFToOfx {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(180);
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final String WARNINGS_HEADER = "X-GPS-Avisos";
+
+    // Headers the ofx service sends with a converted OFX, relayed to the Convert tool so it can
+    // show the transaction count, the balance check and the warnings. Each one is checked against
+    // the shape the service sends, so nothing else reaches the browser through this proxy.
+    // X-GPS-Avisos is base64(JSON array of strings).
+    private static final Map<String, Pattern> RELAYED_HEADERS =
+            Map.of(
+                    "X-GPS-Lancamentos", Pattern.compile("\\d{1,9}"),
+                    "X-GPS-Parser", Pattern.compile("[A-Za-z0-9_.-]{1,64}"),
+                    "X-GPS-Conferencia", Pattern.compile("ok|divergente"),
+                    "X-GPS-Avisos", Pattern.compile("[A-Za-z0-9+/=]+"));
 
     // HTTP/1.1 on purpose: the JDK client defaults to HTTP/2 and, over plain http, sends an
     // "Upgrade: h2c" request. The ofx service runs on uvicorn, which rejects the upgrade
@@ -119,17 +132,17 @@ public class ConvertPDFToOfx {
                             response.body(),
                             baseName + ".ofx",
                             MediaType.valueOf("application/x-ofx"));
-            // The ofx service sends its warnings (e.g. "bank not identified in the header") as
-            // base64(JSON array) in X-GPS-Avisos. Relay it so the Convert tool can show them;
-            // dropping it would hand the user an OFX with a warning nobody ever sees.
-            String warnings = response.headers().firstValue(WARNINGS_HEADER).orElse("");
-            if (!warnings.isBlank() && warnings.matches("[A-Za-z0-9+/=]+")) {
-                return ResponseEntity.status(ofx.getStatusCode())
-                        .headers(ofx.getHeaders())
-                        .header(WARNINGS_HEADER, warnings)
-                        .body(ofx.getBody());
-            }
-            return ofx;
+            // Dropping these would hand the user an OFX whose warnings nobody ever sees (e.g.
+            // "bank not identified in the header") and no sign of how many transactions it has.
+            HttpHeaders headers = new HttpHeaders();
+            headers.putAll(ofx.getHeaders());
+            RELAYED_HEADERS.forEach(
+                    (name, shape) ->
+                            response.headers()
+                                    .firstValue(name)
+                                    .filter(value -> shape.matcher(value).matches())
+                                    .ifPresent(value -> headers.set(name, value)));
+            return ResponseEntity.status(ofx.getStatusCode()).headers(headers).body(ofx.getBody());
         }
         if (status == 422 || status == 413) {
             // The document itself is the problem (unknown layout, scanned PDF, password,

@@ -271,6 +271,33 @@ export const conversionWarnings = (headers: any): string[] => {
   }
 };
 
+export interface ConversionSummary {
+  entries: number;
+  parser: string | null;
+  /** null when the converter did not say whether the balance check passed */
+  balanceOk: boolean | null;
+}
+
+/**
+ * What the PDF → OFX converter says about a successful conversion: how many
+ * transactions went into the OFX (X-GPS-Lancamentos), which bank layout read
+ * the document (X-GPS-Parser) and whether the transactions add up to the
+ * printed balance (X-GPS-Conferencia: "ok" | "divergente"). Returns null for
+ * any other converter.
+ */
+export const conversionSummary = (headers: any): ConversionSummary | null => {
+  const entries = headers?.["x-gps-lancamentos"];
+  if (typeof entries !== "string" || !/^\d+$/.test(entries)) return null;
+  const parser = headers?.["x-gps-parser"];
+  const balance = headers?.["x-gps-conferencia"];
+  return {
+    entries: Number(entries),
+    parser: typeof parser === "string" && parser ? parser : null,
+    balanceOk:
+      balance === "ok" ? true : balance === "divergente" ? false : null,
+  };
+};
+
 // Toast bodies don't preserve line breaks, so several messages go in a list.
 const messageList = (items: string[]) =>
   createElement(
@@ -288,6 +315,41 @@ const showConversionWarnings = (fileName: string, warnings: string[]) => {
     }),
     body: messageList(warnings),
     isPersistentPopup: true,
+  });
+};
+
+// One toast for the whole batch: with a dozen statements, a toast per file
+// would bury the warnings shown above.
+const showConversionSummaries = (
+  summaries: { name: string; summary: ConversionSummary }[],
+) => {
+  if (summaries.length === 0) return;
+  const lines = summaries.map(({ name, summary }) => {
+    const parts = [
+      i18n.t("convert.ofxEntries", "{{count}} transactions", {
+        count: summary.entries,
+      }),
+    ];
+    if (summary.balanceOk === true) {
+      parts.push(i18n.t("convert.ofxBalanceOk", "balance check passed"));
+    } else if (summary.balanceOk === false) {
+      parts.push(
+        i18n.t("convert.ofxBalanceMismatch", "balance check did not pass"),
+      );
+    }
+    if (summary.parser) parts.push(summary.parser);
+    return `${name}: ${parts.join(" · ")}`;
+  });
+  alert({
+    alertType: summaries.every(({ summary }) => summary.balanceOk === true)
+      ? "success"
+      : "warning",
+    title: i18n.t("convert.ofxSummaryTitle", "OFX ready to import"),
+    body: messageList(lines),
+    // The counts are the point of this toast: shown open, not behind a
+    // chevron, and long enough to compare with the statement.
+    expandable: false,
+    durationMs: 15000,
   });
 };
 
@@ -317,6 +379,7 @@ export const convertProcessor = async (
   if (isSeparateProcessing) {
     // Individual processing for complex cases (PDF→image, smart detection, etc.)
     const failures: { name: string; reason: string }[] = [];
+    const summaries: { name: string; summary: ConversionSummary }[] = [];
     for (const file of selectedFiles) {
       try {
         const formData = buildConvertFormData(parameters, [file]);
@@ -337,6 +400,8 @@ export const convertProcessor = async (
 
         processedFiles.push(convertedFile);
         showConversionWarnings(file.name, conversionWarnings(response.headers));
+        const summary = conversionSummary(response.headers);
+        if (summary) summaries.push({ name: file.name, summary });
       } catch (error) {
         console.warn(`Failed to convert file ${file.name}:`, error);
         failures.push({
@@ -345,6 +410,8 @@ export const convertProcessor = async (
         });
       }
     }
+
+    showConversionSummaries(summaries);
 
     // A failed file used to vanish with only a console warning: the user got
     // the other outputs and no sign that one was missing (a bank statement
