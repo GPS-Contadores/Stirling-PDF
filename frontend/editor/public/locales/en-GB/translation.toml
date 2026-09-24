@@ -3702,6 +3702,7 @@ openFromComputer = "Open from computer"
 openSettings = "Open settings"
 search = "Search"
 searchPlaceholder = "Search files..."
+signOut = "Sign out"
 
 [fileSidebar.fileItem]
 closeViewer = "Close viewer"

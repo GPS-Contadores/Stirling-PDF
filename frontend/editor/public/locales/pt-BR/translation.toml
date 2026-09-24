@@ -3702,6 +3702,7 @@ openFromComputer = "Abrir do computador"
 openSettings = "Abrir configurações"
 search = "Pesquisar"
 searchPlaceholder = "Pesquisar arquivos..."
+signOut = "Sair"
 
 [fileSidebar.fileItem]
 closeViewer = "Fechar visualizador"
