@@ -93,8 +93,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # OneDrive (issue #4): variáveis do repositório, não segredos — os
+          # três valores vão parar no JS do navegador. Sem elas o botão some.
           build-args: |
             VERSION_TAG=${{ steps.versao.outputs.tag }}
+            VITE_GPS_ENTRA_CLIENT_ID=${{ vars.VITE_GPS_ENTRA_CLIENT_ID }}
+            VITE_GPS_TENANT=${{ vars.VITE_GPS_TENANT }}
+            VITE_GPS_SHAREPOINT_HOST=${{ vars.VITE_GPS_SHAREPOINT_HOST }}
           cache-from: type=gha,scope=gps-stirling-pdf
           cache-to: type=gha,mode=max,scope=gps-stirling-pdf
           # Sem manifesto de atestação: a imagem fica com uma plataforma só,

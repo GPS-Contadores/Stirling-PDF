@@ -43,6 +43,12 @@ ARG PROTOTYPES_BUILD=false
 ARG STIRLING_FLAVOR=proprietary
 ENV STIRLING_FLAVOR=${STIRLING_FLAVOR}
 
+# OneDrive integration (GPS fork). Read by Vite during the frontend build below;
+# left empty, the integration stays off. Not secrets: they end up in the JS bundle.
+ARG VITE_GPS_ENTRA_CLIENT_ID=""
+ARG VITE_GPS_TENANT=""
+ARG VITE_GPS_SHAREPOINT_HOST=""
+
 # Bundle only the JPDFium native for this image's target arch.
 ARG TARGETARCH
 RUN JPDFIUM_PLATFORM="$([ "$TARGETARCH" = arm64 ] && echo linux-arm64 || echo linux-x64)" && \

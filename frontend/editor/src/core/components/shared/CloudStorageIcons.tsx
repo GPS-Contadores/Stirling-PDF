@@ -48,7 +48,7 @@ export function GoogleDriveIcon({ colored, ...rest }: CloudIconProps) {
 
 /**
  * OneDrive icon with brand-color hover support.
- * FOR FUTURE USE — OneDrive integration is not yet implemented.
+ * Used by the GPS fork's OneDrive integration (useOneDrivePicker).
  */
 export function OneDriveIcon({ colored, ...rest }: CloudIconProps) {
   return (

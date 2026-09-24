@@ -6,6 +6,10 @@ interface ImportMetaEnv {
   readonly VITE_GOOGLE_DRIVE_CLIENT_ID: string;
   readonly VITE_GOOGLE_DRIVE_API_KEY: string;
   readonly VITE_GOOGLE_DRIVE_APP_ID: string;
+  // OneDrive / SharePoint (GPS fork) — see services/oneDriveConfig.ts
+  readonly VITE_GPS_ENTRA_CLIENT_ID: string;
+  readonly VITE_GPS_TENANT: string;
+  readonly VITE_GPS_SHAREPOINT_HOST: string;
   readonly VITE_SUPABASE_URL: string;
   readonly VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY: string;
   readonly VITE_STRIPE_PUBLISHABLE_KEY: string;

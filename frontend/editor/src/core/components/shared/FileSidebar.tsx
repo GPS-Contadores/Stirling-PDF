@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { useFileState, useFileActions } from "@app/contexts/file/fileHooks";
 import { useAppConfig } from "@app/contexts/AppConfigContext";
 import { useGoogleDrivePicker } from "@app/hooks/useGoogleDrivePicker";
+import { useOneDrivePicker } from "@app/hooks/useOneDrivePicker";
 import {
   useNavigationState,
   useNavigationActions,
@@ -26,7 +27,10 @@ import {
   useIndexedDBRevision,
 } from "@app/contexts/IndexedDBContext";
 import { accountService } from "@app/services/accountService";
-import { GoogleDriveIcon } from "@app/components/shared/CloudStorageIcons";
+import {
+  GoogleDriveIcon,
+  OneDriveIcon,
+} from "@app/components/shared/CloudStorageIcons";
 import { Wordmark } from "@app/components/shared/Wordmark";
 import type { StirlingFileStub } from "@app/types/fileContext";
 import MenuIcon from "@mui/icons-material/Menu";
@@ -123,6 +127,11 @@ const FileSidebar = forwardRef<HTMLDivElement, FileSidebarProps>(
       isEnabled: isGoogleDriveEnabled,
       openPicker: openGoogleDrivePicker,
     } = useGoogleDrivePicker();
+    const {
+      isEnabled: isOneDriveEnabled,
+      isLoading: isOneDriveLoading,
+      openPicker: openOneDrivePicker,
+    } = useOneDrivePicker();
     const { state } = useFileState();
     const { actions: fileActions } = useFileActions();
     const { actions: navActions } = useNavigationActions();
@@ -399,6 +408,29 @@ const FileSidebar = forwardRef<HTMLDivElement, FileSidebarProps>(
     }, [
       isGoogleDriveEnabled,
       openGoogleDrivePicker,
+      addFiles,
+      navActions,
+      isMultiTool,
+      onPickGoogleDriveFiles,
+    ]);
+
+    // Handle OneDrive. Picked files follow the Google Drive override, which is
+    // about where cloud-picked files go, not about Drive itself.
+    const handleOneDriveClick = useCallback(async () => {
+      if (isOneDriveLoading) return;
+      const files = await openOneDrivePicker({ multiple: true });
+      if (files.length === 0) return;
+      if (onPickGoogleDriveFiles) {
+        await onPickGoogleDriveFiles(files);
+        return;
+      }
+      await addFiles(files);
+      if (!isMultiTool) {
+        navActions.setWorkbench(files.length === 1 ? "viewer" : "fileEditor");
+      }
+    }, [
+      isOneDriveLoading,
+      openOneDrivePicker,
       addFiles,
       navActions,
       isMultiTool,
@@ -922,6 +954,48 @@ const FileSidebar = forwardRef<HTMLDivElement, FileSidebarProps>(
                   {!collapsed && (
                     <span className="file-sidebar-action-label sidebar-content-fade">
                       {t("fileSidebar.googleDrive", "Google Drive")}
+                    </span>
+                  )}
+                </div>
+              </Tooltip>
+            )}
+
+            {isOneDriveEnabled && (
+              <Tooltip
+                label={t("fileSidebar.oneDrive", "Open from OneDrive")}
+                position="right"
+                withinPortal
+                disabled={!collapsed}
+              >
+                <div
+                  className={`file-sidebar-cloud-row${isOneDriveLoading ? " disabled" : ""}`}
+                  onClick={handleOneDriveClick}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void handleOneDriveClick();
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-busy={isOneDriveLoading}
+                  aria-label={t("fileSidebar.oneDrive", "Open from OneDrive")}
+                >
+                  <div className="file-sidebar-cloud-icon-wrapper">
+                    <OneDriveIcon
+                      className="file-sidebar-cloud-icon-gray"
+                      style={{ color: "var(--text-secondary)" }}
+                    />
+                    <OneDriveIcon
+                      colored
+                      className="file-sidebar-cloud-icon-color"
+                    />
+                  </div>
+                  {!collapsed && (
+                    <span className="file-sidebar-action-label sidebar-content-fade">
+                      {isOneDriveLoading
+                        ? t("oneDrive.downloading", "Downloading…")
+                        : t("fileSidebar.oneDriveShort", "OneDrive")}
                     </span>
                   )}
                 </div>

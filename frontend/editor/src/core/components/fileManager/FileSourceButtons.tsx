@@ -5,12 +5,16 @@ import PhonelinkIcon from "@mui/icons-material/Phonelink";
 import { useTranslation } from "react-i18next";
 import { useFileManagerContext } from "@app/contexts/FileManagerContext";
 import { useGoogleDrivePicker } from "@app/hooks/useGoogleDrivePicker";
+import { useOneDrivePicker } from "@app/hooks/useOneDrivePicker";
 import { useFileActionTerminology } from "@app/hooks/useFileActionTerminology";
 import { useFileActionIcons } from "@app/hooks/useFileActionIcons";
 import { useAppConfig } from "@app/contexts/AppConfigContext";
 import { useIsMobile } from "@app/hooks/useIsMobile";
 import MobileUploadModal from "@app/components/shared/MobileUploadModal";
-import { GoogleDriveIcon } from "@app/components/shared/CloudStorageIcons";
+import {
+  GoogleDriveIcon,
+  OneDriveIcon,
+} from "@app/components/shared/CloudStorageIcons";
 
 interface FileSourceButtonsProps {
   horizontal?: boolean;
@@ -29,6 +33,11 @@ const FileSourceButtons: React.FC<FileSourceButtonsProps> = ({
   const { t } = useTranslation();
   const { isEnabled: isGoogleDriveEnabled, openPicker: openGoogleDrivePicker } =
     useGoogleDrivePicker();
+  const {
+    isEnabled: isOneDriveEnabled,
+    isLoading: isOneDriveLoading,
+    openPicker: openOneDrivePicker,
+  } = useOneDrivePicker();
   const terminology = useFileActionTerminology();
   const icons = useFileActionIcons();
   const UploadIcon = icons.upload;
@@ -45,6 +54,14 @@ const FileSourceButtons: React.FC<FileSourceButtonsProps> = ({
       }
     } catch (error) {
       console.error("Failed to pick files from Google Drive:", error);
+    }
+  };
+
+  // Errors are reported by the hook; the Drive select handler is source-agnostic.
+  const handleOneDriveClick = async () => {
+    const files = await openOneDrivePicker({ multiple: true });
+    if (files.length > 0) {
+      onGoogleDriveSelect(files);
     }
   };
 
@@ -123,6 +140,32 @@ const FileSourceButtons: React.FC<FileSourceButtonsProps> = ({
       >
         {horizontal ? terminology.upload : terminology.uploadFiles}
       </Button>
+
+      {isOneDriveEnabled && (
+        <Button
+          variant="subtle"
+          color="var(--mantine-color-gray-6)"
+          leftSection={<OneDriveIcon colored />}
+          justify={horizontal ? "center" : "flex-start"}
+          onClick={handleOneDriveClick}
+          loading={isOneDriveLoading}
+          fullWidth={!horizontal}
+          size={horizontal ? "xs" : "sm"}
+          styles={{
+            root: {
+              backgroundColor: "transparent",
+              border: "none",
+              "&:hover": {
+                backgroundColor: "var(--mantine-color-gray-0)",
+              },
+            },
+          }}
+        >
+          {horizontal
+            ? t("fileManager.oneDriveShort", "OneDrive")
+            : t("fileManager.oneDrive", "Open from OneDrive")}
+        </Button>
+      )}
 
       {!shouldHideGoogleDrive && (
         <Button
