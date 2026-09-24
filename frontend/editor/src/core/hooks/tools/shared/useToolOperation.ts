@@ -20,7 +20,7 @@ import {
   FileId,
   StirlingFileStub,
 } from "@app/types/fileContext";
-import { FILE_EVENTS } from "@app/services/errorUtils";
+import { FILE_EVENTS, normalizeAxiosErrorData } from "@app/services/errorUtils";
 import { zipFileService } from "@app/services/zipFileService";
 import { getFilenameWithoutExtension } from "@app/utils/fileUtils";
 import {
@@ -585,6 +585,26 @@ export const useToolOperation = <TParams>(
               "Process failed due to invalid/corrupted file(s)",
             );
             return;
+          }
+        } catch (_e) {
+          void _e;
+        }
+
+        // Tool requests use responseType "blob", so a ProblemDetail error body
+        // arrives as a Blob and the user only saw "Request failed with status
+        // code 400". Read it and expose the backend's message as a string:
+        // `detail` (ProblemDetail) or `error` (JobExecutorService's 500 body).
+        try {
+          const data = error?.response?.data;
+          if (data && typeof data.text === "function") {
+            const normalized = await normalizeAxiosErrorData(data);
+            const detail =
+              typeof normalized === "string"
+                ? normalized
+                : (normalized?.detail ?? normalized?.error);
+            if (typeof detail === "string" && detail.trim()) {
+              error.response.data = detail.replace(/^Job failed: /, "").trim();
+            }
           }
         } catch (_e) {
           void _e;
