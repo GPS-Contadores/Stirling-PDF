@@ -181,7 +181,7 @@
 
 .iconLabel {
   font-family:
-    "Inter",
+    "Poppins",
     system-ui,
     -apple-system,
     "Segoe UI",
@@ -290,7 +290,7 @@
 /* Title styles */
 .titleText {
   font-family:
-    "Inter",
+    "Poppins",
     system-ui,
     -apple-system,
     "Segoe UI",
@@ -305,7 +305,7 @@
 /* Body text styles */
 .bodyText {
   font-family:
-    "Inter",
+    "Poppins",
     system-ui,
     -apple-system,
     "Segoe UI",
@@ -335,10 +335,11 @@
 }
 
 .v2Badge {
-  background: #dbefff;
-  color: #2a4bff;
+  /* GPS: pill pálida do design system (eyebrow) */
+  background: #f8cfb4;
+  color: #e3611a;
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: 9999px;
   font-size: 14px;
   font-weight: 600;
 }

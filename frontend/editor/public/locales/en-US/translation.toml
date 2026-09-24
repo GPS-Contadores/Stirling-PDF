@@ -4614,14 +4614,14 @@ passwordRequired = "Password is required"
 signIn = "Sign in"
 validating = "Validating invitation..."
 validationError = "Failed to validate invitation link"
-welcome = "Welcome to Stirling PDF"
+welcome = "Welcome to GPS Documentos"
 welcomeSubtitle = "Complete your account setup to get started"
 welcomeTitle = "You've been invited!"
 
 [landing]
 addFiles = "Add Files"
 heroSubtitle = "Drop in or add an existing PDF to get started."
-heroTitle = "Stirling PDF"
+heroTitle = "GPS Documentos"
 mobileUpload = "Upload from Mobile"
 openFromComputer = "Open from computer"
 uploadFromComputer = "Upload from computer"
@@ -5011,8 +5011,8 @@ body = "Stirling PDF V2 ships with dozens of tools and a refreshed layout. Take 
 title = "Tour Overview"
 
 [onboarding.welcomeSlide]
-body = "Stirling PDF is now ready for teams of all sizes. This update includes a new layout, powerful new admin capabilities, and our most requested feature - <strong>Edit Text</strong>."
-title = "Welcome to Stirling"
+body = "GPS Documentos is now ready for teams of all sizes. This update includes a new layout, powerful new admin capabilities, and our most requested feature - <strong>Edit Text</strong>."
+title = "Welcome to GPS Documentos"
 
 [onboarding.whatsNew]
 activeFilesView = "Use Active Files to see everything you have open and pick what to work on."

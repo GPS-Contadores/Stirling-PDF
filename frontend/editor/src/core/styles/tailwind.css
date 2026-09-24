@@ -1,5 +1,6 @@
 /* Import minimal theme variables */
 @import "./theme.css";
+@import "./gps-theme.css";
 
 @layer base {
   @tailwind base;

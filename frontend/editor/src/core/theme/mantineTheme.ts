@@ -58,13 +58,26 @@ const gray: MantineColorsTuple = [
   "var(--color-gray-900)",
 ];
 
+// GPS: fonte única Poppins (carregada no index.html). Ver styles/gps-theme.css.
+const gpsFontFamily =
+  '"Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif';
+
 export const mantineTheme = createTheme({
   // Primary color
   primaryColor: "primary",
+  // GPS: o laranja da marca é o tom 6 da escala, no claro e no escuro
+  // (o padrão do Mantine no escuro é o 8, um laranja queimado).
+  primaryShade: { light: 6, dark: 6 },
+
+  fontFamily: gpsFontFamily,
+  headings: { fontFamily: gpsFontFamily },
 
   // Color palette
   colors: {
     primary,
+    // GPS: azul é da Gestão, não da GPS. Os color="blue" e
+    // --mantine-color-blue-* do Stirling passam a usar o laranja.
+    blue: primary,
     green,
     yellow,
     gray,
