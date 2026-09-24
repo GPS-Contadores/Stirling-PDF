@@ -319,6 +319,11 @@ export default defineConfig(async ({ mode }) => {
     build: {
       target: "esnext",
       rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, "index.html"),
+          // Redirect URI of the OneDrive integration (GPS fork).
+          "msal-redirect": path.resolve(__dirname, "msal-redirect.html"),
+        },
         output: {
           manualChunks: {
             "vendor-react": ["react", "react-dom"],

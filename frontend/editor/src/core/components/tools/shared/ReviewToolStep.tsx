@@ -11,6 +11,9 @@ import { useFileActionTerminology } from "@app/hooks/useFileActionTerminology";
 import { useFileActionIcons } from "@app/hooks/useFileActionIcons";
 import { saveOperationResults } from "@app/services/operationResultsSaveService";
 import { useFileActions, useFileState } from "@app/contexts/FileContext";
+import { useOneDrivePicker } from "@app/hooks/useOneDrivePicker";
+import { OneDriveIcon } from "@app/components/shared/CloudStorageIcons";
+import { alert as showToast } from "@app/components/toast";
 import { FileId } from "@app/types/fileContext";
 import i18n from "@app/i18n";
 
@@ -40,6 +43,7 @@ function ReviewStepContent<TParams = unknown>({
   const stepRef = useRef<HTMLDivElement>(null);
   const { actions: fileActions } = useFileActions();
   const { selectors } = useFileState();
+  const oneDrive = useOneDrivePicker();
 
   const handleUndo = async () => {
     try {
@@ -79,6 +83,25 @@ function ReviewStepContent<TParams = unknown>({
       console.error("[ReviewToolStep] Failed to download file:", message);
       alert(`Failed to download file: ${message}`);
     }
+  };
+
+  // Each output file goes up on its own (not the zip the download builds).
+  const handleSaveToOneDrive = async () => {
+    const uploaded = await oneDrive.saveFiles(operation.files ?? []);
+    if (!uploaded || uploaded.length === 0) return;
+    const [first] = uploaded;
+    showToast({
+      alertType: "success",
+      title: t("oneDrive.saved", "Saved to OneDrive"),
+      body: uploaded.map((item) => item.name).join(", "),
+      ...(uploaded.length === 1 && first.webUrl
+        ? {
+            buttonText: t("oneDrive.openFile", "Open"),
+            buttonCallback: () =>
+              window.open(first.webUrl, "_blank", "noopener,noreferrer"),
+          }
+        : {}),
+    });
   };
 
   // Auto-scroll to bottom when content appears
@@ -147,6 +170,19 @@ function ReviewStepContent<TParams = unknown>({
           onClick={handleDownload}
         >
           {terminology.download}
+        </Button>
+      )}
+      {oneDrive.isEnabled && (operation.files?.length ?? 0) > 0 && (
+        <Button
+          data-testid="save-to-onedrive-button"
+          leftSection={<OneDriveIcon colored />}
+          variant="outline"
+          fullWidth
+          mb="md"
+          loading={oneDrive.isLoading}
+          onClick={handleSaveToOneDrive}
+        >
+          {t("oneDrive.saveToOneDrive", "Save to OneDrive")}
         </Button>
       )}
 
