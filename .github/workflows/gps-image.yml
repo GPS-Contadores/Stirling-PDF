@@ -1,0 +1,102 @@
+# Imagem do fork da GPS em ghcr.io/gps-contadores/stirling-pdf — é a que o
+# serviço `stirling` do Railway puxa (ARG STIRLING_IMAGE em
+# conversor-documentos/stirling/Dockerfile).
+#
+# Versão enxuta do push-docker.yml do upstream: só a variante padrão
+# (docker/embedded/Dockerfile), só linux/amd64 (o Railway é amd64 e o arm64
+# emulado dobra o tempo), sem Docker Hub e sem assinatura.
+#
+#   push na gps/main   -> :gps-main e :sha-<curto>  (o sha serve para rollback)
+#   tag gps-v*         -> :<tag>                    (ex.: :gps-v1.0.0)
+#
+# O pacote precisa estar público nas configurações dele para o Railway puxar
+# sem credencial.
+
+name: GPS - Imagem Docker
+
+on:
+  push:
+    branches:
+      - gps/main
+    tags:
+      - "gps-v*"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  imagem:
+    # workflow_dispatch fora da gps/main ou de uma tag gps-v* não teria tag para publicar.
+    if: github.ref == 'refs/heads/gps/main' || startsWith(github.ref, 'refs/tags/gps-v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # O build do gradle com frontend dentro do Docker não cabe no disco
+      # livre do runner padrão.
+      - name: Liberar disco do runner
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /usr/local/share/boost
+          docker system prune -af || true
+          df -h /
+
+      # Nunca "alpha": scripts/download-security-jar.sh trata esse valor à parte.
+      - name: Versão da imagem
+        id: versao
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=gps-main-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Os labels gerados aqui sobrescrevem os do Dockerfile — em especial
+      # org.opencontainers.image.source, que aponta para o upstream e é o que
+      # o GHCR usa para ligar o pacote a um repositório.
+      - name: Tags e labels
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: ghcr.io/gps-contadores/stirling-pdf
+          tags: |
+            type=raw,value=gps-main,enable=${{ github.ref == 'refs/heads/gps/main' }}
+            type=sha,prefix=sha-,enable=${{ github.ref == 'refs/heads/gps/main' }}
+            type=ref,event=tag
+          labels: |
+            org.opencontainers.image.version=${{ steps.versao.outputs.tag }}
+            org.opencontainers.image.vendor=GPS Contadores
+
+      - name: Build e push
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: ./docker/embedded/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION_TAG=${{ steps.versao.outputs.tag }}
+          cache-from: type=gha,scope=gps-stirling-pdf
+          cache-to: type=gha,mode=max,scope=gps-stirling-pdf
+          # Sem manifesto de atestação: a imagem fica com uma plataforma só,
+          # sem a entrada "unknown/unknown" no GHCR.
+          provenance: false
