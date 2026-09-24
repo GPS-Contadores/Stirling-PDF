@@ -4607,14 +4607,14 @@ passwordRequired = "A senha é obrigatória"
 signIn = "Entrar"
 validating = "Validando convite..."
 validationError = "Falha ao validar link de convite"
-welcome = "Bem-vindo ao Stirling PDF"
+welcome = "Bem-vindo ao GPS Documentos"
 welcomeSubtitle = "Conclua a configuração da sua conta para começar"
 welcomeTitle = "Você foi convidado!"
 
 [landing]
 addFiles = "Adicionar arquivos"
 heroSubtitle = "Solte ou adicione um PDF existente para começar."
-heroTitle = "Stirling PDF"
+heroTitle = "GPS Documentos"
 mobileUpload = "Enviar do celular"
 openFromComputer = "Abrir do computador"
 uploadFromComputer = "Fazer upload do computador"
@@ -5004,8 +5004,8 @@ body = "O Stirling PDF V2 vem com dezenas de ferramentas e um layout renovado. F
 title = "Visão geral do tour"
 
 [onboarding.welcomeSlide]
-body = "Stirling PDF agora está pronto para equipes de todos os tamanhos. Esta atualização inclui um novo layout, poderosos recursos de administração e nosso recurso mais solicitado - <strong>Editar texto</strong>."
-title = "Bem-vindo ao Stirling"
+body = "O GPS Documentos agora está pronto para equipes de todos os tamanhos. Esta atualização inclui um novo layout, poderosos recursos de administração e nosso recurso mais solicitado - <strong>Editar texto</strong>."
+title = "Bem-vindo ao GPS Documentos"
 
 [onboarding.whatsNew]
 activeFilesView = "Use Arquivos ativos para ver tudo o que você tem aberto e escolher em que trabalhar."
