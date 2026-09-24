@@ -38,14 +38,28 @@ primeira execução, 34 dos 38 estavam nessa situação.
    do upstream usa `step-security/harden-runner`, então nenhum passa da
    partida: o run termina em `startup_failure` sem executar nenhum passo. Isso
    vale para os que nunca rodaram e para os que chegarem em sincronizações
-   futuras.
+   futuras, **enquanto usarem alguma action fora da lista**.
 2. **Desligar pela API** os que já estão registrados, para que não pintem commit
    e PR de vermelho com `startup_failure`.
+
+O `harden-runner` em todo workflow é convenção do upstream, não garantia. Um
+workflow que só use passos `run:`, ou só actions da lista (`actions/checkout`,
+`docker/*`), passa pela trava 1, e se ele nunca rodou a trava 2 não o alcança.
+O script confere isso em cada workflow não registrado e marca como
+`DESCOBERTO` o que escaparia, saindo com erro. Esse workflow roda no primeiro
+disparo; se o disparo fizer estrago (abrir PR, publicar imagem), resolva antes
+de sincronizar a `main`.
 
 ## Depois de cada sincronização com o upstream
 
 **Rode o script de novo.** Ele é idempotente. Se um workflow do upstream bateu
 na trava 1 e ficou registrado, o script o desliga.
+
+O script sai com erro, sem mudar nada, se não conseguir listar ou ler os
+workflows. Sai com erro também se um workflow ficar `DESCOBERTO` ou uma chamada
+falhar (`FALHOU`). Só o `gh` é necessário. O `--dry-run` funciona sem admin; o
+modo que aplica exige admin e se recusa a rodar com o Actions desligado, para
+não religá-lo.
 
 ## Ao mudar as actions de um `gps-*.yml`
 
