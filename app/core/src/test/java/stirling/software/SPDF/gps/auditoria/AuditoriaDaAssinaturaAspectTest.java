@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,6 +64,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import stirling.software.SPDF.controller.api.security.CertSignController;
 import stirling.software.SPDF.model.api.security.SignPDFWithCertRequest;
@@ -199,20 +202,56 @@ class AuditoriaDaAssinaturaAspectTest {
     }
 
     @Test
-    void pdfDevolvidoSemAssinaturaNovaERegistradoComoErro() throws Exception {
+    void falhaDoSignChegaAoClienteEViraErroNaTrilha() throws Exception {
         MDC.put(IdentidadeDoProxy.MDC_EMAIL, "fulano@gestao.com.br");
-        // sign() engole a exceção e devolve arquivo vazio: é o que o PDF corrompido provoca.
-        doThrow(new java.io.IOException("PDF corrompido"))
-                .when(fabrica)
-                .load(any(MultipartFile.class));
+        // Desde o #34 o sign() repassa a falha em vez de responder 200 com PDF vazio.
+        doThrow(new IOException("PDF corrompido")).when(fabrica).load(any(MultipartFile.class));
 
-        ResponseEntity<Resource> resposta = controlador(true).signPDFWithCert(pedido(SENHA), null);
+        assertThatThrownBy(() -> controlador(true).signPDFWithCert(pedido(SENHA), null))
+                .isInstanceOf(IOException.class)
+                .hasMessage("PDF corrompido");
+
+        EventoDeAuditoria evento = unicoEvento();
+        assertThat(evento.resultado()).isEqualTo(EventoDeAuditoria.ERRO);
+        assertThat(evento.motivo()).isEqualTo("IOException: PDF corrompido");
+        assertThat(evento.documento().sha256Antes()).isEqualTo(sha256(pdf));
+        assertThat(evento.documento().sha256Depois()).isNull();
+    }
+
+    /**
+     * A conferência pela saída continua como defesa: se algum caminho voltar a responder 200 sem
+     * assinar, a trilha registra erro em vez de sucesso.
+     */
+    @Test
+    void respostaSemAssinaturaNovaViraErroNaTrilha() throws Exception {
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "fulano@gestao.com.br");
+        Path semAssinar = Files.write(dir.resolve("sem-assinatura.pdf"), pdf);
+
+        ResponseEntity<Resource> resposta =
+                comAuditoria(new DevolveSemAssinar(fabrica, semAssinar), true)
+                        .signPDFWithCert(pedido(SENHA), null);
 
         assertThat(resposta.getStatusCode().is2xxSuccessful()).isTrue();
         EventoDeAuditoria evento = unicoEvento();
         assertThat(evento.resultado()).isEqualTo(EventoDeAuditoria.ERRO);
         assertThat(evento.motivo()).isEqualTo(AuditoriaDaAssinaturaAspect.SEM_ASSINATURA_NOVA);
-        assertThat(evento.documento().bytesDepois()).isZero();
+        assertThat(evento.documento().sha256Depois()).isEqualTo(sha256(pdf));
+    }
+
+    /** Responde 200 com o PDF de entrada, sem assinar. */
+    static class DevolveSemAssinar extends CertSignController {
+        private final Path arquivo;
+
+        DevolveSemAssinar(CustomPDFDocumentFactory fabrica, Path arquivo) {
+            super(fabrica, null, mock(TempFileManager.class), mock(HardwareKeyStoreService.class));
+            this.arquivo = arquivo;
+        }
+
+        @Override
+        public ResponseEntity<Resource> signPDFWithCert(
+                SignPDFWithCertRequest request, HttpServletRequest httpRequest) {
+            return ResponseEntity.ok(new FileSystemResource(arquivo));
+        }
     }
 
     private CertSignController controlador(boolean exigirIdentidade) {
@@ -238,9 +277,13 @@ class AuditoriaDaAssinaturaAspectTest {
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
-        CertSignController alvo =
+        return comAuditoria(
                 new CertSignController(
-                        fabricaDePdf, null, temporarios, mock(HardwareKeyStoreService.class));
+                        fabricaDePdf, null, temporarios, mock(HardwareKeyStoreService.class)),
+                exigirIdentidade);
+    }
+
+    private CertSignController comAuditoria(CertSignController alvo, boolean exigirIdentidade) {
         // A cadeia como o auto-proxy do Spring monta: um único ExposeInvocationInterceptor no
         // início, o salto de thread por fora (AutoJobAspect, @Order(20)) e a auditoria por dentro.
         // O AspectJProxyFactory põe um Expose antes de cada aspecto e esconderia o defeito da

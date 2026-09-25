@@ -34,8 +34,9 @@ import org.bouncycastle.cms.SignerInformation;
 /**
  * Lê do PDF assinado o certificado que assinou por último.
  *
- * <p>É daqui, e não do status HTTP, que a trilha tira o sucesso: o {@code CertSignController.sign}
- * engole a exceção e responde 200 com arquivo vazio ou sem assinatura nova.
+ * <p>É daqui, e não do status HTTP, que a trilha tira o sucesso. Desde o #34 o {@code
+ * CertSignController.sign} repassa a falha em vez de responder 200 com arquivo vazio; a conferência
+ * pela saída fica como defesa, para o caso de algum caminho voltar a responder 200 sem assinar.
  */
 final class AssinaturaDoPdf {
 

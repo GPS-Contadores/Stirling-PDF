@@ -109,10 +109,14 @@ volume do `stirling`), um evento JSON por linha, arquivo por mês em UTC.
   ICP-Brasil (`2.16.76.1.3.3` CNPJ, `2.16.76.1.3.1` CPF) ou do fim do CN. Em
   erro, só se sabe o `arquivo_sha256` do certificado enviado.
 - **Nunca** entra o conteúdo do documento nem a senha.
-- **Sucesso é conferido no PDF de saída**, não no status HTTP: o
-  `CertSignController.sign()` engole a exceção e responde 200 com arquivo vazio.
-  Nesse caso a linha sai como `erro` com o motivo "o PDF devolvido não traz
-  assinatura nova".
+- **Falha na assinatura** (PDF inválido, página inexistente, erro do PDFBox)
+  chega ao cliente como erro e vira linha `erro` com o motivo da exceção. Até o
+  #34 o `CertSignController.sign()` engolia a exceção e respondia 200 com
+  arquivo vazio.
+- **Sucesso é conferido no PDF de saída**, não no status HTTP: a última
+  assinatura tem de ser nova e cobrir o arquivo até o fim. É defesa para o caso
+  de algum caminho voltar a responder 200 sem assinar: a linha sai como `erro`
+  com o motivo "o PDF devolvido não traz assinatura nova".
 - Se a trilha não conseguir gravar (disco cheio, permissão), a assinatura falha.
 
 ## Só acréscimo e cadeia de hash
