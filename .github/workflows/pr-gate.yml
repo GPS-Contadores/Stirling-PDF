@@ -1,0 +1,168 @@
+# Gate de PR da GPS Contadores.
+#
+# SELF-CONTAINED de propósito. Workflow reutilizável entre repositórios PRIVADOS
+# não funciona no plano Free: a API aceita `access_level=organization`, mas o
+# GitHub ignora e o run do chamador morre em `startup_failure`. Verificado
+# empiricamente em 2026-08-27, inclusive com um repositório de nome comum, para
+# descartar que o problema fosse o repo se chamar ".github".
+#
+# Fonte da verdade: GPS-Contadores/.github -> templates/pr-gate.yml
+# Para atualizar um repositorio: ./bin/adopt-existing.sh <caminho-do-clone>
+#
+# No plano Free este check SINALIZA mas nao impede o merge — o bloqueio real
+# depende dos rulesets de docs/UPGRADE-TEAM.md.
+
+name: PR Gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+env:
+  ALLOWED_BRANCH_PREFIXES: "feat|fix|chore|docs|refactor|test"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate:
+    name: Convenções e segredos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # O corpo e o nome da branch são conteúdo controlado por quem abre o PR.
+      # Passamos por env, nunca interpolados direto no script, para não permitir
+      # injeção de shell a partir do texto do PR.
+      - name: Vínculo com issue
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # O `owner/repo#N` opcional aceita issue de OUTRO repositório. Sem ele, uma
+          # mudança mecânica que atravessa N repositórios exigia N issues — uma por
+          # repo, criada só para satisfazer esta checagem e fechada minutos depois.
+          # Medido em 22/09/2026: de 16 issues abertas num dia, 12 viveram menos de
+          # 20 minutos e 8 menos de 5. Com o `owner/repo#N`, uma issue guarda-chuva
+          # cobre os N PRs, e o vínculo continua obrigatório.
+          if printf '%s' "$PR_BODY" | grep -qiE -- '(clos(e|es|ed)|fix(e[sd])?|resolv(e|es|ed))[[:space:]]+([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#[0-9]+'; then
+            echo "::notice::PR vinculado a uma issue."
+          else
+            echo "::error title=Sem vínculo com issue::O corpo do PR precisa conter 'Closes #N' — ou 'Closes owner/repo#N', para issue de outro repositório — para a issue fechar no merge e o card andar no Project."
+            exit 1
+          fi
+
+      - name: Nome da branch
+        if: '!cancelled()'
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          PREFIXES: ${{ env.ALLOWED_BRANCH_PREFIXES }}
+        run: |
+          if ! printf '%s' "$BRANCH" | grep -qE -- "^($PREFIXES)/.+"; then
+            echo "::error title=Branch fora do padrão::'$BRANCH' não segue a convenção. Use <tipo>/<descricao>, onde tipo é um de: $PREFIXES"
+            exit 1
+          fi
+          # A regra pede DESCRIÇÃO depois da barra, não o número da issue: o número
+          # já vai no 'Closes #N' do corpo. Reprova quando não há descrição — só o
+          # número, ou 'issue-N' no começo (fix/issue-61, feat/12,
+          # chore/issue-89-agent-draft). Número seguido de descrição passa
+          # (fix/61-retry-de-conexao).
+          DESC="${BRANCH#*/}"
+          if printf '%s' "$DESC" | grep -qiE -- '^([0-9]+|issue[-_]?[0-9]+([-_].*)?)$'; then
+            echo "::error title=Branch com número em vez de descrição::'$BRANCH' usa o número da issue no lugar da descrição. Renomeie para <tipo>/<o-que-muda> (ex.: fix/retry-de-conexao) com 'git branch -m', empurre de novo e mantenha o 'Closes #N' no corpo do PR."
+            exit 1
+          fi
+          echo "::notice::Branch '$BRANCH' segue a convenção."
+
+      - name: Segredos e arquivos proibidos no diff
+        if: '!cancelled()'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          fail=0
+
+          # Garantir que os dois lados do diff existem localmente. Sem isto o
+          # `git diff` devolve vazio e a checagem PASSA sem olhar nada — uma
+          # verificação de segredo que falha aberta é pior que não ter nenhuma.
+          git fetch --no-tags --depth=0 origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null \
+            || git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" 2>/dev/null \
+            || true
+
+          for sha in "$BASE_SHA" "$HEAD_SHA"; do
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "::error title=Diff indisponível::Não consegui resolver o commit $sha. A varredura de segredos não rodou — tratando como reprovação."
+              exit 1
+            fi
+          done
+
+          MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          echo "Comparando $MERGE_BASE..$HEAD_SHA"
+
+          git diff --name-only --diff-filter=ACMR "$MERGE_BASE" "$HEAD_SHA" > /tmp/names.txt
+          NAMES=$(cat /tmp/names.txt)
+          if [ -z "$NAMES" ]; then
+            echo "::error title=Diff vazio::O PR não apresenta arquivos alterados entre a base e o head. Isso não deveria acontecer — reprovando por segurança."
+            exit 1
+          fi
+          echo "Arquivos no diff: $(printf '%s\n' "$NAMES" | wc -l | tr -d ' ')"
+
+          # --- 1. Arquivos que nunca devem ser versionados ---
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            case "$f" in
+              *.example|*.sample|*.template) continue ;;
+            esac
+            case "$f" in
+              .env|.env.*|*/.env|*/.env.*)
+                echo "::error file=$f::Arquivo .env não pode ser versionado. Use .env.example sem valores reais." ; fail=1 ;;
+              .mcp.json|*/.mcp.json)
+                echo "::error file=$f::.mcp.json contém o Bearer token do ai-memory. Adicione ao .gitignore." ; fail=1 ;;
+              .claude/settings.local.json|*/.claude/settings.local.json)
+                echo "::error file=$f::.claude/settings.local.json é pessoal e carrega os hooks com a credencial do ai-memory. Adicione ao .gitignore." ; fail=1 ;;
+              *.pem|*.key|*.p12|*.pfx)
+                echo "::error file=$f::Material criptográfico não entra no repositório." ; fail=1 ;;
+            esac
+          done < /tmp/names.txt
+
+          # --- 2. Padrões de segredo nas linhas ADICIONADAS ---
+          # Só linhas '+', para não reprovar um PR por dívida antiga do repo.
+          git diff --unified=0 --diff-filter=ACMR "$MERGE_BASE" "$HEAD_SHA" \
+            | grep -E '^[+]' | grep -v '^[+][+][+]' > /tmp/added.txt
+          echo "Linhas adicionadas analisadas: $(wc -l < /tmp/added.txt | tr -d ' ')"
+
+          check() {
+            if grep -qE -- "$2" /tmp/added.txt; then
+              echo "::error title=Possível segredo::$1 detectado nas linhas adicionadas. Remova do diff, ROTACIONE a credencial (ela já está no histórico local) e reescreva o commit."
+              fail=1
+            fi
+          }
+
+          check "Bearer token"             'Bearer[[:space:]]+[A-Za-z0-9_-]{32,}'
+          check "Chave privada PEM"        '[-]{5}BEGIN[[:alnum:][:space:]]*PRIVATE KEY'
+          check "Access key da AWS"        'AKIA[0-9A-Z]{16}'
+          check "Token do GitHub"          'gh[pousr]_[A-Za-z0-9]{30,}'
+          check "Chave da Anthropic"       'sk-ant-[A-Za-z0-9_-]{20,}'
+          check "Chave da OpenAI"          'sk-[A-Za-z0-9]{40,}'
+          check "Senha embutida em código" '(password|passwd|senha)[[:space:]]*[=:][[:space:]]*["'"'"'][^"'"'"']{8,}'
+          check "Token do ai-memory"       'AI_MEMORY_AUTH_TOKEN=[A-Za-z0-9_-]{16,}'
+
+          [ "$fail" -eq 0 ] && echo "::notice::Nenhum segredo ou arquivo proibido no diff."
+          exit "$fail"
+
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo "### PR Gate — GPS Contadores"
+            echo ""
+            echo "Regras verificadas: vínculo com issue, convenção de branch, segredos no diff."
+            echo ""
+            echo "> No plano **Free** este check é advisory: ele sinaliza, mas o GitHub não impede o merge."
+            echo "> O bloqueio efetivo entra com os rulesets de \`docs/UPGRADE-TEAM.md\` no plano Team."
+          } >> "$GITHUB_STEP_SUMMARY"
