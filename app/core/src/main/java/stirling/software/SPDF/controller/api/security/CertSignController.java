@@ -1,6 +1,7 @@
 package stirling.software.SPDF.controller.api.security;
 
 import java.awt.*;
+import java.awt.geom.AffineTransform;
 import java.beans.PropertyEditorSupport;
 import java.io.*;
 import java.nio.file.Files;
@@ -97,6 +98,11 @@ public class CertSignController {
         Security.addProvider(new BouncyCastleProvider());
     }
 
+    /** Size, in points, of the visible signature when no area is chosen. */
+    static final float DEFAULT_SIGNATURE_WIDTH = 200;
+
+    static final float DEFAULT_SIGNATURE_HEIGHT = 50;
+
     @InitBinder
     public void initBinder(WebDataBinder binder) {
         binder.registerCustomEditor(
@@ -136,6 +142,36 @@ public class CertSignController {
             String location,
             String reason,
             Boolean showLogo) {
+        sign(
+                pdfDocumentFactory,
+                input,
+                output,
+                instance,
+                showSignature,
+                pageNumber,
+                name,
+                location,
+                reason,
+                showLogo,
+                null);
+    }
+
+    /**
+     * Same as the overload above, placing the visible signature in {@code area}; a null area keeps
+     * the default position.
+     */
+    public static void sign(
+            CustomPDFDocumentFactory pdfDocumentFactory,
+            MultipartFile input,
+            OutputStream output,
+            CreateSignature instance,
+            Boolean showSignature,
+            Integer pageNumber,
+            String name,
+            String location,
+            String reason,
+            Boolean showLogo,
+            SignatureArea area) {
         try (PDDocument doc = pdfDocumentFactory.load(input)) {
             PDSignature signature = new PDSignature();
             signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
@@ -147,7 +183,8 @@ public class CertSignController {
             if (Boolean.TRUE.equals(showSignature)) {
                 try (SignatureOptions signatureOptions = new SignatureOptions()) {
                     signatureOptions.setVisualSignature(
-                            instance.createVisibleSignature(doc, signature, pageNumber, showLogo));
+                            instance.createVisibleSignature(
+                                    doc, signature, pageNumber, showLogo, area));
                     signatureOptions.setPage(pageNumber);
 
                     doc.addSignature(signature, instance, signatureOptions);
@@ -193,6 +230,8 @@ public class CertSignController {
         // Convert 1-indexed page number (user input) to 0-indexed page number (API requirement)
         Integer pageNumber = request.getPageNumber() != null ? (request.getPageNumber() - 1) : null;
         Boolean showLogo = request.getShowLogo();
+        SignatureArea signatureArea =
+                Boolean.TRUE.equals(showSignature) ? signatureArea(request) : null;
 
         if (StringUtils.isBlank(certType)) {
             throw ExceptionUtils.createIllegalArgumentException(
@@ -301,7 +340,8 @@ public class CertSignController {
                     name,
                     location,
                     reason,
-                    showLogo);
+                    showLogo,
+                    signatureArea);
         } catch (IOException e) {
             signedOut.close();
             throw e;
@@ -317,6 +357,106 @@ public class CertSignController {
         // Return the signed PDF
         return WebResponseUtils.pdfFileToWebResponse(
                 signedOut, GeneralUtils.generateFilename(pdf.getOriginalFilename(), "_signed.pdf"));
+    }
+
+    /**
+     * Where the visible signature goes, as fractions (0-1) of the page as the reader sees it:
+     * inside the CropBox, after /Rotate, with the origin at the top-left corner.
+     */
+    public record SignatureArea(float x, float y, float width, float height) {}
+
+    /** Reads the optional signature area from the request; null when none was sent. */
+    static SignatureArea signatureArea(SignPDFWithCertRequest request) {
+        Float x = request.getSignatureX();
+        Float y = request.getSignatureY();
+        Float width = request.getSignatureWidth();
+        Float height = request.getSignatureHeight();
+        if (x == null && y == null && width == null && height == null) {
+            return null;
+        }
+        if (x == null || y == null || width == null || height == null) {
+            throw ExceptionUtils.createIllegalArgumentException(
+                    "error.invalidArgument",
+                    "Invalid argument: {0}",
+                    "signatureX, signatureY, signatureWidth and signatureHeight must be sent"
+                            + " together");
+        }
+        // Tolerate the browser's rounding when the area touches the page edge.
+        float tolerance = 1e-4f;
+        boolean insidePage =
+                x >= 0
+                        && y >= 0
+                        && width > 0
+                        && height > 0
+                        && x + width <= 1 + tolerance
+                        && y + height <= 1 + tolerance;
+        if (!insidePage) {
+            throw ExceptionUtils.createIllegalArgumentException(
+                    "error.invalidArgument",
+                    "Invalid argument: {0}",
+                    "signature area must lie within the page (fractions from 0 to 1)");
+        }
+        return new SignatureArea(x, y, Math.min(width, 1 - x), Math.min(height, 1 - y));
+    }
+
+    /** The page's /Rotate normalised to 0, 90, 180 or 270 (anything else is ignored). */
+    static int displayRotation(PDPage page) {
+        int rotation = ((page.getRotation() % 360) + 360) % 360;
+        return rotation % 90 == 0 ? rotation : 0;
+    }
+
+    /**
+     * Converts {@code area}, drawn on the page as displayed, to the widget rectangle in the page's
+     * unrotated user space.
+     */
+    static PDRectangle signatureRectangle(PDPage page, SignatureArea area) {
+        PDRectangle box = page.getCropBox();
+        float pageWidth = box.getWidth();
+        float pageHeight = box.getHeight();
+        int rotation = displayRotation(page);
+        boolean sideways = rotation == 90 || rotation == 270;
+        float shownWidth = sideways ? pageHeight : pageWidth;
+        float shownHeight = sideways ? pageWidth : pageHeight;
+
+        float x = area.x() * shownWidth;
+        float y = area.y() * shownHeight;
+        float w = area.width() * shownWidth;
+        float h = area.height() * shownHeight;
+
+        // Undo the clockwise /Rotate: same mapping as PDFBox's CreateVisibleSignature2
+        // example, plus the CropBox origin, which that example ignores.
+        float llx;
+        float lly;
+        float rectWidth;
+        float rectHeight;
+        switch (rotation) {
+            case 90 -> {
+                llx = y;
+                lly = x;
+                rectWidth = h;
+                rectHeight = w;
+            }
+            case 180 -> {
+                llx = pageWidth - x - w;
+                lly = y;
+                rectWidth = w;
+                rectHeight = h;
+            }
+            case 270 -> {
+                llx = pageWidth - y - h;
+                lly = pageHeight - x - w;
+                rectWidth = h;
+                rectHeight = w;
+            }
+            default -> {
+                llx = x;
+                lly = pageHeight - y - h;
+                rectWidth = w;
+                rectHeight = h;
+            }
+        }
+        return new PDRectangle(
+                box.getLowerLeftX() + llx, box.getLowerLeftY() + lly, rectWidth, rectHeight);
     }
 
     private MultipartFile validateFilePresent(
@@ -397,9 +537,20 @@ public class CertSignController {
         public InputStream createVisibleSignature(
                 PDDocument srcDoc, PDSignature signature, Integer pageNumber, Boolean showLogo)
                 throws IOException {
+            return createVisibleSignature(srcDoc, signature, pageNumber, showLogo, null);
+        }
+
+        public InputStream createVisibleSignature(
+                PDDocument srcDoc,
+                PDSignature signature,
+                Integer pageNumber,
+                Boolean showLogo,
+                SignatureArea area)
+                throws IOException {
             // modified from org.apache.pdfbox.examples.signature.CreateVisibleSignature2
             try (PDDocument doc = new PDDocument()) {
-                PDPage page = new PDPage(srcDoc.getPage(pageNumber).getMediaBox());
+                PDPage srcPage = srcDoc.getPage(pageNumber);
+                PDPage page = new PDPage(srcPage.getMediaBox());
                 doc.addPage(page);
                 PDAcroForm acroForm = new PDAcroForm(doc);
                 doc.getDocumentCatalog().setAcroForm(acroForm);
@@ -411,9 +562,19 @@ public class CertSignController {
                 acroForm.getCOSObject().setDirect(true);
                 acroFormFields.add(signatureField);
 
-                PDRectangle rect = new PDRectangle(0, 0, 200, 50);
+                PDRectangle rect =
+                        area == null
+                                ? new PDRectangle(
+                                        0, 0, DEFAULT_SIGNATURE_WIDTH, DEFAULT_SIGNATURE_HEIGHT)
+                                : signatureRectangle(srcPage, area);
 
                 widget.setRectangle(rect);
+
+                // The appearance is drawn upright, in the orientation the reader sees the page.
+                int rotation = area == null ? 0 : displayRotation(srcPage);
+                boolean sideways = rotation == 90 || rotation == 270;
+                float width = sideways ? rect.getHeight() : rect.getWidth();
+                float height = sideways ? rect.getWidth() : rect.getHeight();
 
                 // from PDVisualSigBuilder.createHolderForm()
                 PDStream stream = new PDStream(doc);
@@ -421,9 +582,12 @@ public class CertSignController {
                 PDResources res = new PDResources();
                 form.setResources(res);
                 form.setFormType(1);
-                PDRectangle bbox = new PDRectangle(rect.getWidth(), rect.getHeight());
-                float height = bbox.getHeight();
+                PDRectangle bbox = new PDRectangle(width, height);
                 form.setBBox(bbox);
+                if (rotation != 0) {
+                    // Counter-rotate so the appearance reads upright on the rotated page.
+                    form.setMatrix(AffineTransform.getQuadrantRotateInstance(rotation / 90));
+                }
                 PDFont font = new PDType1Font(FontName.TIMES_BOLD);
 
                 // from PDVisualSigBuilder.createAppearanceDictionary()
@@ -434,6 +598,22 @@ public class CertSignController {
                 widget.setAppearance(appearance);
 
                 try (PDPageContentStream cs = new PDPageContentStream(doc, appearanceStream)) {
+                    if (area != null) {
+                        // The layout below is made for the default box; scale it, keeping the
+                        // proportions, to fit the chosen area from its top-left corner.
+                        float scale =
+                                Math.min(
+                                        width / DEFAULT_SIGNATURE_WIDTH,
+                                        height / DEFAULT_SIGNATURE_HEIGHT);
+                        cs.transform(
+                                new Matrix(
+                                        scale,
+                                        0,
+                                        0,
+                                        scale,
+                                        0,
+                                        height - DEFAULT_SIGNATURE_HEIGHT * scale));
+                    }
                     if (Boolean.TRUE.equals(showLogo)) {
                         cs.saveGraphicsState();
                         PDExtendedGraphicsState extState = new PDExtendedGraphicsState();
@@ -453,7 +633,7 @@ public class CertSignController {
                     cs.beginText();
                     cs.setFont(font, fontSize);
                     cs.setNonStrokingColor(Color.black);
-                    cs.newLineAtOffset(fontSize, height - leading);
+                    cs.newLineAtOffset(fontSize, DEFAULT_SIGNATURE_HEIGHT - leading);
                     cs.setLeading(leading);
 
                     X509Certificate cert = (X509Certificate) getCertificateChain()[0];
