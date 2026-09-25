@@ -290,3 +290,37 @@ docs/type3/signatures/
 
 # Local screenshot artifacts from *-screenshots.spec.ts
 frontend/editor/screenshots/
+
+# --- ai-memory / agentes de IA (gerenciado por GPS-Contadores/.github) ---
+# Estes arquivos carregam o Bearer token do servidor corporativo de memória.
+.mcp.json
+
+# .claude/ costuma estar no gitignore GLOBAL de quem instalou o Claude Code,
+# o que faria as skills gerenciadas sumirem do commit em algumas máquinas e
+# não em outras. As três linhas abaixo garantem o mesmo resultado em todas:
+# a pasta volta a ser rastreável, tudo dentro dela é ignorado, e só as skills
+# gerenciadas (que o time precisa ter iguais) são versionadas.
+!.claude/
+.claude/*
+!.claude/skills/
+!.claude/settings.json
+# .claude/settings.local.json fica fora de propósito: é o arquivo PESSOAL do
+# Claude Code e é onde vivem os hooks do ai-memory corporativo.
+
+# Backups que o `ai-memory install-instructions` deixa para trás.
+*.bak-[0-9]*
+
+# --- credenciais ---
+.env
+.env.*
+!.env.example
+!.env.template
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Certificados de teste do upstream (renovados no #22): o bloco acima ignora
+# *.p12, e uma renovação futura sumiria do `git add` sem aviso.
+!frontend/editor/src/core/tests/test-fixtures/certs/*.p12

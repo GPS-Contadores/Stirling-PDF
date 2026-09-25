@@ -185,8 +185,8 @@ const CropAreaSelector: React.FC<CropAreaSelectorProps> = ({
       {/* PDF Thumbnail Content */}
       {children}
 
-      {/* Crop Area Overlay (hidden while no area has been drawn) */}
-      {!disabled && domRect.width > 0 && domRect.height > 0 && (
+      {/* Crop Area Overlay */}
+      {!disabled && (
         <Box
           ref={overlayRef}
           style={{

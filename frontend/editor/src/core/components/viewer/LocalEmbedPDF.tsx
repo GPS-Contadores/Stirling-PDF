@@ -103,6 +103,7 @@ import { pdfiumWasmUrl } from "@app/services/wasmPrecompiler";
 import { FormFieldOverlay } from "@app/tools/formFill/FormFieldOverlay";
 import { ButtonAppearanceOverlay } from "@app/tools/formFill/ButtonAppearanceOverlay";
 import SignatureFieldOverlay from "@app/components/viewer/SignatureFieldOverlay";
+import { CertSignatureAreaLayer } from "@app/components/viewer/CertSignatureAreaLayer";
 import { CommentsSidebar } from "@app/components/viewer/CommentsSidebar";
 import { CommentAuthorProvider } from "@app/contexts/CommentAuthorContext";
 import { accountService } from "@app/services/accountService";
@@ -1173,6 +1174,14 @@ export function LocalEmbedPDF({
                                       onSelect={setSelectedSignatureId}
                                     />
                                   )}
+
+                                  {/* Visible certificate-signature area (only while the cert-sign tool asks for it) */}
+                                  <CertSignatureAreaLayer
+                                    documentId={documentId}
+                                    pageIndex={pageIndex}
+                                    pageWidth={width}
+                                    pageHeight={height}
+                                  />
                                 </div>
                               </PagePointerProvider>
                             </Rotate>

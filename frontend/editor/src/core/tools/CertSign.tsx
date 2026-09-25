@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { createToolFlow } from "@app/components/tools/shared/createToolFlow";
 import { useAppConfig } from "@app/contexts/AppConfigContext";
@@ -14,6 +14,14 @@ import { useSignatureAppearanceTips } from "@app/components/tooltips/useSignatur
 import { useSignModeTips } from "@app/components/tooltips/useSignModeTips";
 import { useBaseTool } from "@app/hooks/tools/shared/useBaseTool";
 import { BaseToolProps, ToolComponent } from "@app/types/tool";
+import { useCertSignatureArea } from "@app/contexts/CertSignatureAreaContext";
+import {
+  useNavigationActions,
+  useNavigationState,
+} from "@app/contexts/NavigationContext";
+import { useSelectedFiles } from "@app/contexts/file/fileHooks";
+import { useViewer } from "@app/contexts/ViewerContext";
+import type { SignatureArea } from "@app/utils/signatureAreaCoordinates";
 
 const CertSign = (props: BaseToolProps) => {
   const { t } = useTranslation();
@@ -43,6 +51,63 @@ const CertSign = (props: BaseToolProps) => {
     base.params.parameters.signMode,
     base.params.updateParameter,
   ]);
+
+  // The visible signature's area is drawn on the page in the main viewer.
+  const { setPlacement } = useCertSignatureArea();
+  const { actions: navActions } = useNavigationActions();
+  const { workbench } = useNavigationState();
+  const { scrollActions } = useViewer();
+  const { selectedFileStubs } = useSelectedFiles();
+  const { showSignature, pageNumber, signatureArea } = base.params.parameters;
+  const updateParameter = base.params.updateParameter;
+  const placingArea =
+    showSignature && base.selectedFiles.length > 0 && !base.hasResults;
+
+  // The same page and area go to every selected file, so the shortest one
+  // bounds the page number.
+  const pageCounts = selectedFileStubs
+    .map((stub) => stub.processedFile?.totalPages)
+    .filter((count): count is number => !!count);
+  const pageCount = pageCounts.length ? Math.min(...pageCounts) : undefined;
+
+  const handleAreaChange = useCallback(
+    (pageIndex: number, area: SignatureArea) => {
+      updateParameter("pageNumber", pageIndex + 1);
+      updateParameter("signatureArea", area);
+    },
+    [updateParameter],
+  );
+
+  useEffect(() => {
+    setPlacement(
+      placingArea
+        ? {
+            pageIndex: pageNumber - 1,
+            area: signatureArea,
+            onChange: handleAreaChange,
+            disabled: base.endpointLoading,
+          }
+        : null,
+    );
+  }, [
+    placingArea,
+    pageNumber,
+    signatureArea,
+    handleAreaChange,
+    base.endpointLoading,
+    setPlacement,
+  ]);
+
+  useEffect(() => () => setPlacement(null), [setPlacement]);
+
+  // Choosing a visible signature opens the viewer, where the area is drawn.
+  const wasPlacingArea = useRef(false);
+  useEffect(() => {
+    if (placingArea && !wasPlacingArea.current) {
+      navActions.setWorkbench("viewer");
+    }
+    wasPlacingArea.current = placingArea;
+  }, [placingArea, navActions]);
 
   const certTypeTips = useCertificateTypeTips();
   const appearanceTips = useSignatureAppearanceTips();
@@ -166,7 +231,11 @@ const CertSign = (props: BaseToolProps) => {
             parameters={base.params.parameters}
             onParameterChange={base.params.updateParameter}
             disabled={base.endpointLoading}
-            file={base.selectedFiles[0]}
+            pageCount={pageCount}
+            areaInViewer={placingArea}
+            viewerOpen={workbench === "viewer"}
+            onOpenViewer={() => navActions.setWorkbench("viewer")}
+            onPageChosen={(page) => scrollActions.scrollToPage(page)}
           />
         ),
       },
