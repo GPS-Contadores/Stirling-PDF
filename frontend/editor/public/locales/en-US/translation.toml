@@ -2246,6 +2246,14 @@ stepTitle = "Signature Appearance"
 visibility = "Visibility"
 visible = "Visible"
 
+[certSign.appearance.area]
+hint = "Draw a box on the page where the signature should appear. Without one, the signature goes to the default position."
+hintChosen = "Drag the box to move it, or its edges to resize it."
+previewAlt = "Preview of page {{page}}"
+reset = "Use default position"
+title = "Signature position"
+unavailable = "Page preview unavailable"
+
 [certSign.appearance.options]
 title = "Signature Details"
 
@@ -2262,7 +2270,7 @@ title = "Invisible Signatures"
 [certSign.appearance.tooltip.visible]
 bullet1 = "Shows signer name and date on the document"
 bullet2 = "Can include reason and location for signing"
-bullet3 = "Choose which page to place the signature"
+bullet3 = "Choose the page and draw where the signature goes"
 bullet4 = "Optional logo can be included"
 text = "Shows a signature block on the PDF with your name, date, and optional details. Useful when you want readers to clearly see the document is signed."
 title = "Visible Signatures"

@@ -75,3 +75,39 @@ describe("buildCertSignFormData - hardware cert types", () => {
     expect(formData.get("pkcs11LibraryPath")).toBeNull();
   });
 });
+
+describe("buildCertSignFormData - signature area", () => {
+  const area = { x: 0.5, y: 0.8, width: 0.3, height: 0.1 };
+
+  test("visible signature with a drawn area sends its fractions", () => {
+    const formData = buildCertSignFormData(
+      params({ signMode: "AUTO", showSignature: true, signatureArea: area }),
+      pdf(),
+    );
+
+    expect(formData.get("signatureX")).toBe("0.5");
+    expect(formData.get("signatureY")).toBe("0.8");
+    expect(formData.get("signatureWidth")).toBe("0.3");
+    expect(formData.get("signatureHeight")).toBe("0.1");
+  });
+
+  test("without a drawn area no position is sent (default placement)", () => {
+    const formData = buildCertSignFormData(
+      params({ signMode: "AUTO", showSignature: true }),
+      pdf(),
+    );
+
+    expect(formData.get("pageNumber")).toBe("1");
+    expect(formData.get("signatureX")).toBeNull();
+    expect(formData.get("signatureHeight")).toBeNull();
+  });
+
+  test("invisible signature ignores a leftover area", () => {
+    const formData = buildCertSignFormData(
+      params({ signMode: "AUTO", showSignature: false, signatureArea: area }),
+      pdf(),
+    );
+
+    expect(formData.get("signatureX")).toBeNull();
+  });
+});

@@ -72,6 +72,13 @@ export const buildCertSignFormData = (
     formData.append("name", parameters.name);
     formData.append("pageNumber", parameters.pageNumber.toString());
     formData.append("showLogo", parameters.showLogo.toString());
+    if (parameters.signatureArea) {
+      const { x, y, width, height } = parameters.signatureArea;
+      formData.append("signatureX", x.toString());
+      formData.append("signatureY", y.toString());
+      formData.append("signatureWidth", width.toString());
+      formData.append("signatureHeight", height.toString());
+    }
   }
 
   return formData;
