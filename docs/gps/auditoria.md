@@ -6,11 +6,8 @@ o hash do documento antes e depois. Desenho completo na
 [#16](https://github.com/GPS-Contadores/Stirling-PDF/issues/16); esta parte é a
 [#18](https://github.com/GPS-Contadores/Stirling-PDF/issues/18).
 
-Fica de fora a finalização de sessão de assinatura (`SigningSessionController`,
-em `proprietary/`), que assina pelo `PdfSigningServiceImpl` sem passar pelo
-`cert-sign`. Hoje ela não é alcançável: exige login do próprio Stirling, e o
-GPS Documentos roda com `enableLogin: false`. Se o login do Stirling for
-ligado, esse caminho precisa entrar na trilha antes.
+A finalização de sessão de assinatura também entra (ver
+[Sessão de assinatura](#sessão-de-assinatura)), embora hoje não seja alcançável.
 
 O código fica em `app/core/.../SPDF/gps/auditoria/`, fora de `proprietary/`
 (licença) e fora dos arquivos do upstream, para não conflitar na sincronização.
@@ -87,6 +84,53 @@ segredo chegaria também ao `ofx`.
 ela, defina `GPS_AUDITORIA_EXIGIRIDENTIDADE=false` (nunca no Railway). Pelo
 proxy local, `GPS_AUDITORIA_PROXYCONFIAVEL=auth-proxy` (o nome do serviço no
 compose).
+
+## Sessão de assinatura
+
+A sessão de assinatura do Stirling (`POST
+/api/v1/security/cert-sign/sessions/{id}/finalize`, em `proprietary/`) assina
+cada participante pelo `PdfSigningService.signWithKeystore`, sem passar pelo
+`cert-sign`. Hoje ela não é alcançável: o `SigningSessionController` exige
+login do próprio Stirling, e o GPS Documentos roda com `enableLogin: false`. O
+`AuditoriaDaSessaoDeAssinaturaAspect` já cobre esse caminho para que ligar o
+login não abra uma assinatura sem linha
+([#31](https://github.com/GPS-Contadores/Stirling-PDF/issues/31)).
+
+- **Uma linha por participante**, com `ferramenta` `cert-sign/sessao/PKCS12`
+  (ou `JKS`) e `documento.nome` `sessão <id>`. O nome do documento fica no
+  `WorkflowSession`, do `proprietary`, que o core não importa.
+- **O usuário é o `Principal` do login do Stirling**, não os headers do proxy:
+  vai em `nome_de_usuario`, e também em `email` quando tem `@`. É quem
+  finalizou a sessão; o titular do certificado sai da assinatura no PDF.
+- **Sem usuário logado, a assinatura é negada** e registrada como `negado`,
+  como no `cert-sign`. O aspecto lança 403, mas o `finalizeSession` do
+  upstream transforma qualquer exceção em 500. `GPS_AUDITORIA_EXIGIRIDENTIDADE=false`
+  também desliga essa exigência.
+- **Sucesso é conferido no PDF devolvido**, do mesmo jeito que no `cert-sign`, e
+  a trilha que não grava faz a assinatura falhar.
+- **A validação do certificado não entra.** O `CertificateSubmissionValidator`
+  testa o certificado enviado assinando um PDF em branco pelo mesmo
+  `signWithKeystore`. O aspecto marca a thread enquanto o
+  `validateAndExtractInfo` roda e deixa essa assinatura passar sem linha.
+
+**Defeito do upstream visto no teste (25/09/2026):** com certificado P12/JKS, a
+finalização não assina e responde 200 com o PDF sem mudança. O envio do
+participante grava o keystore cifrado (`enc:…`), e o
+`SigningFinalizationService.extractCertificateSubmission` tenta ler esse campo
+como base64 antes de decifrar. A exceção é engolida, o participante é pulado
+("No certificate submission found … skipping"), e o documento sai como
+`_shared_signed.pdf` sem assinatura digital. A trilha não registra nada, porque
+nada foi assinado. O código está em `proprietary/` e é igual na `main` do
+upstream; precisa ser corrigido lá antes de a sessão servir para assinar.
+
+Os pointcuts citam as classes do `proprietary` por texto: o core compila sem
+ele quando `DISABLE_ADDITIONAL_FEATURES=true`. Se o upstream renomear o
+validador ou o método, o pointcut deixa de casar sem erro, e o teste do
+certificado passa a ser tratado como assinatura: sai na trilha ou, para o
+participante sem login, é negado e trava o envio do certificado. Quem acusa
+isso é o
+`AuditoriaDaSessaoDeAssinaturaAspectTest.validacaoDoCertificadoNaoVaiParaATrilha`,
+que carrega o validador real por nome.
 
 ## Onde grava
 

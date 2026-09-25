@@ -80,8 +80,8 @@ import stirling.software.common.util.TempFileManager;
  */
 class AuditoriaDaAssinaturaAspectTest {
 
-    private static final String SENHA = "segredo-de-teste";
-    private static final String CNPJ = "11222333000181";
+    static final String SENHA = "segredo-de-teste";
+    static final String CNPJ = "11222333000181";
 
     @TempDir Path dir;
 
@@ -371,7 +371,7 @@ class AuditoriaDaAssinaturaAspectTest {
      * e-CNPJ sintético: CNPJ no otherName 2.16.76.1.3.3 e outro número no CN, para provar que o
      * otherName tem prioridade.
      */
-    private static byte[] pfxIcpBrasil() throws Exception {
+    static byte[] pfxIcpBrasil() throws Exception {
         KeyPairGenerator gerador = KeyPairGenerator.getInstance("RSA");
         gerador.initialize(2048);
         KeyPair par = gerador.generateKeyPair();

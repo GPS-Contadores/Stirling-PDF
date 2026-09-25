@@ -240,7 +240,7 @@ public class AuditoriaDaAssinaturaAspect {
     }
 
     /** A mensagem de exceção de keystore não leva a senha; mesmo assim, só classe e mensagem. */
-    private static String motivo(Throwable falha) {
+    static String motivo(Throwable falha) {
         Throwable raiz = falha;
         while (raiz.getCause() != null && raiz.getCause() != raiz) {
             raiz = raiz.getCause();

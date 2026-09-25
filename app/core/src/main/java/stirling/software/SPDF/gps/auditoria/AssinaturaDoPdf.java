@@ -60,6 +60,44 @@ final class AssinaturaDoPdf {
     static Optional<EventoDeAuditoria.Certificado> daUltimaAssinatura(
             Path pdf, long tamanhoDaEntrada) {
         try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
+            return daUltimaAssinatura(
+                    doc,
+                    Files.size(pdf),
+                    tamanhoDaEntrada,
+                    assinatura -> {
+                        try (InputStream in = Files.newInputStream(pdf)) {
+                            return assinatura.getContents(in);
+                        }
+                    });
+        } catch (IOException | RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** O mesmo, para quem assina em memória ({@code PdfSigningService.signWithKeystore}). */
+    static Optional<EventoDeAuditoria.Certificado> daUltimaAssinatura(
+            byte[] pdf, long tamanhoDaEntrada) {
+        if (pdf == null || pdf.length == 0) {
+            return Optional.empty();
+        }
+        try (PDDocument doc = Loader.loadPDF(pdf)) {
+            return daUltimaAssinatura(
+                    doc, pdf.length, tamanhoDaEntrada, assinatura -> assinatura.getContents(pdf));
+        } catch (IOException | RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    private interface ConteudoDaAssinatura {
+        byte[] ler(PDSignature assinatura) throws IOException;
+    }
+
+    private static Optional<EventoDeAuditoria.Certificado> daUltimaAssinatura(
+            PDDocument doc,
+            long tamanhoDoArquivo,
+            long tamanhoDaEntrada,
+            ConteudoDaAssinatura conteudo) {
+        try {
             PDSignature assinatura = doc.getLastSignatureDictionary();
             if (assinatura == null) {
                 return Optional.empty();
@@ -68,14 +106,10 @@ final class AssinaturaDoPdf {
             if (faixa == null
                     || faixa.length != 4
                     || faixa[1] < tamanhoDaEntrada
-                    || (long) faixa[2] + faixa[3] != Files.size(pdf)) {
+                    || (long) faixa[2] + faixa[3] != tamanhoDoArquivo) {
                 return Optional.empty();
             }
-            byte[] conteudo;
-            try (InputStream in = Files.newInputStream(pdf)) {
-                conteudo = assinatura.getContents(in);
-            }
-            return Optional.of(doCms(conteudo));
+            return Optional.of(doCms(conteudo.ler(assinatura)));
         } catch (IOException | CMSException | RuntimeException e) {
             return Optional.empty();
         }
