@@ -4,11 +4,14 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 
 import org.eclipse.jetty.ee11.servlet.ServletContextRequest;
 import org.slf4j.MDC;
@@ -51,8 +54,20 @@ public class FiltroIdentidadeDoProxy extends OncePerRequestFilter {
 
     static final String QUALQUER_ORIGEM = "*";
 
+    /** Um aviso por minuto e por origem: DNS fora do ar ou proxy mal configurado viram 1 linha. */
+    private static final Duration INTERVALO_DOS_AVISOS = Duration.ofMinutes(1);
+
+    /** {@link InetAddress#getAllByName}, trocável no teste. */
+    @FunctionalInterface
+    interface Resolvedor {
+        InetAddress[] resolver(String nome) throws UnknownHostException;
+    }
+
     private final List<String> origensConfiaveis;
     private final Function<HttpServletRequest, InetAddress> parDaConexao;
+    private final Resolvedor resolvedor;
+    private final AvisoComIntervalo avisos =
+            new AvisoComIntervalo(INTERVALO_DOS_AVISOS, System::nanoTime);
 
     @Autowired
     public FiltroIdentidadeDoProxy(@Value("${gps.auditoria.proxy-confiavel:}") String origens) {
@@ -61,12 +76,20 @@ public class FiltroIdentidadeDoProxy extends OncePerRequestFilter {
 
     FiltroIdentidadeDoProxy(
             String origens, Function<HttpServletRequest, InetAddress> parDaConexao) {
+        this(origens, parDaConexao, InetAddress::getAllByName);
+    }
+
+    FiltroIdentidadeDoProxy(
+            String origens,
+            Function<HttpServletRequest, InetAddress> parDaConexao,
+            Resolvedor resolvedor) {
         this.origensConfiaveis =
                 Arrays.stream((origens == null ? "" : origens).split(","))
                         .map(String::trim)
                         .filter(o -> !o.isEmpty())
                         .toList();
         this.parDaConexao = parDaConexao;
+        this.resolvedor = resolvedor;
         if (origensConfiaveis.isEmpty()) {
             log.warn(
                     "gps.auditoria.proxy-confiavel vazio: a identidade do proxy é ignorada e a"
@@ -82,7 +105,9 @@ public class FiltroIdentidadeDoProxy extends OncePerRequestFilter {
         limpar();
         InetAddress par = parDaConexao.apply(request);
         String enderecoDoPar = par != null ? par.getHostAddress() : "desconhecido";
-        if (confiavel(par)) {
+        // Sem header de identidade não há o que conferir: CSS, JS e healthcheck não resolvem DNS.
+        boolean trazIdentidade = request.getHeader("X-Forwarded-Email") != null;
+        if (trazIdentidade && confiavel(par)) {
             colocar(IdentidadeDoProxy.MDC_EMAIL, request.getHeader("X-Forwarded-Email"));
             colocar(IdentidadeDoProxy.MDC_USUARIO, request.getHeader("X-Forwarded-User"));
             colocar(
@@ -92,12 +117,17 @@ public class FiltroIdentidadeDoProxy extends OncePerRequestFilter {
             colocar(IdentidadeDoProxy.MDC_IP, ip(request, enderecoDoPar));
         } else {
             colocar(IdentidadeDoProxy.MDC_IP, enderecoDoPar);
-            if (request.getHeader("X-Forwarded-Email") != null) {
+            if (trazIdentidade) {
                 colocar(IdentidadeDoProxy.MDC_ORIGEM_RECUSADA, enderecoDoPar);
-                log.warn(
-                        "Identidade do proxy recusada: a conexão veio de {}, fora de"
-                                + " gps.auditoria.proxy-confiavel",
-                        enderecoDoPar);
+                long suprimidos = avisos.avisar("recusada:" + enderecoDoPar);
+                if (suprimidos >= 0) {
+                    log.warn(
+                            "Identidade do proxy recusada: a conexão veio de {}, fora de"
+                                    + " gps.auditoria.proxy-confiavel ({} avisos iguais"
+                                    + " suprimidos no último minuto)",
+                            enderecoDoPar,
+                            suprimidos);
+                }
             }
         }
         try {
@@ -118,13 +148,20 @@ public class FiltroIdentidadeDoProxy extends OncePerRequestFilter {
             }
             try {
                 // O IP do proxy muda a cada deploy; a JVM guarda a resolução por 30 s.
-                for (InetAddress endereco : InetAddress.getAllByName(origem)) {
+                for (InetAddress endereco : resolvedor.resolver(origem)) {
                     if (endereco.equals(par)) {
                         return true;
                     }
                 }
             } catch (UnknownHostException e) {
-                log.warn("gps.auditoria.proxy-confiavel: {} não resolve", origem);
+                long suprimidos = avisos.avisar("dns:" + origem);
+                if (suprimidos >= 0) {
+                    log.warn(
+                            "gps.auditoria.proxy-confiavel: {} não resolve ({} avisos iguais"
+                                    + " suprimidos no último minuto)",
+                            origem,
+                            suprimidos);
+                }
             }
         }
         return false;
@@ -180,6 +217,37 @@ public class FiltroIdentidadeDoProxy extends OncePerRequestFilter {
     private static String ip(HttpServletRequest request, String enderecoDoPar) {
         String encaminhado = request.getHeader("X-Forwarded-For");
         return encaminhado != null && !encaminhado.isBlank() ? encaminhado.trim() : enderecoDoPar;
+    }
+
+    /** No máximo um aviso por chave a cada intervalo, contando os que ficaram de fora. */
+    static final class AvisoComIntervalo {
+        private final long intervaloNanos;
+        private final LongSupplier relogio;
+
+        /** Por chave: nanoTime do último aviso e quantos foram suprimidos desde ele. */
+        private final ConcurrentHashMap<String, long[]> estado = new ConcurrentHashMap<>();
+
+        AvisoComIntervalo(Duration intervalo, LongSupplier relogio) {
+            this.intervaloNanos = intervalo.toNanos();
+            this.relogio = relogio;
+        }
+
+        /** -1 se não é hora de avisar; senão, quantos avisos iguais foram suprimidos antes. */
+        long avisar(String chave) {
+            long agora = relogio.getAsLong();
+            long[] suprimidos = {-1};
+            estado.compute(
+                    chave,
+                    (k, anterior) -> {
+                        if (anterior == null || agora - anterior[0] >= intervaloNanos) {
+                            suprimidos[0] = anterior == null ? 0 : anterior[1];
+                            return new long[] {agora, 0};
+                        }
+                        anterior[1]++;
+                        return anterior;
+                    });
+            return suprimidos[0];
+        }
     }
 
     private static void colocar(String chave, String valor) {

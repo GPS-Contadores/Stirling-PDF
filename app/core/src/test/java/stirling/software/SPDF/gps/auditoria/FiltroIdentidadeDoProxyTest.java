@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
@@ -143,5 +146,47 @@ class FiltroIdentidadeDoProxyTest {
                         (req, res) -> vista.set(IdentidadeDoProxy.doMdc()));
 
         assertThat(vista.get().presente()).isFalse();
+    }
+
+    @Test
+    void soResolveODnsDoProxyQuandoARequisicaoTrazIdentidade() throws Exception {
+        AtomicInteger consultas = new AtomicInteger();
+        FiltroIdentidadeDoProxy filtro =
+                new FiltroIdentidadeDoProxy(
+                        "auth-proxy.railway.internal",
+                        r -> endereco(r.getRemoteAddr()),
+                        nome -> {
+                            consultas.incrementAndGet();
+                            return new InetAddress[] {endereco("127.0.0.1")};
+                        });
+        MockHttpServletRequest css = new MockHttpServletRequest("GET", "/assets/app.css");
+        css.setRemoteAddr("127.0.0.1");
+        AtomicReference<IdentidadeDoProxy> vista = new AtomicReference<>();
+
+        filtro.doFilter(css, new MockHttpServletResponse(), (req, res) -> {});
+        assertThat(consultas).hasValue(0);
+
+        filtro.doFilter(
+                comIdentidade("127.0.0.1"),
+                new MockHttpServletResponse(),
+                (req, res) -> vista.set(IdentidadeDoProxy.doMdc()));
+        assertThat(consultas).hasValue(1);
+        assertThat(vista.get().email()).isEqualTo("auditor@gestao.com.br");
+    }
+
+    @Test
+    void avisoRepetidoSaiUmaVezPorIntervaloContandoOsSuprimidos() {
+        AtomicLong agora = new AtomicLong();
+        FiltroIdentidadeDoProxy.AvisoComIntervalo avisos =
+                new FiltroIdentidadeDoProxy.AvisoComIntervalo(Duration.ofMinutes(1), agora::get);
+
+        assertThat(avisos.avisar("dns:auth-proxy")).isZero();
+        assertThat(avisos.avisar("dns:auth-proxy")).isEqualTo(-1);
+        assertThat(avisos.avisar("dns:auth-proxy")).isEqualTo(-1);
+        assertThat(avisos.avisar("recusada:fd12::6")).isZero();
+
+        agora.addAndGet(Duration.ofMinutes(1).toNanos());
+        assertThat(avisos.avisar("dns:auth-proxy")).isEqualTo(2);
+        assertThat(avisos.avisar("dns:auth-proxy")).isEqualTo(-1);
     }
 }

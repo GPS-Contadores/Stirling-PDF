@@ -44,6 +44,14 @@ Esses headers só são confiáveis porque:
   (`PreserveRequestValue: false` em `getPassUserHeaders`, `stripHeaders` em
   `pkg/middleware/headers.go`).
 
+O nome em `GPS_AUDITORIA_PROXYCONFIAVEL` só é resolvido quando a requisição traz
+`X-Forwarded-Email`; CSS, JS e healthcheck não consultam o DNS. A JVM guarda a
+resolução por 30 s: logo depois de um redeploy do `auth-proxy`, que troca o IP
+dele, assinaturas legítimas podem sair como `negado` "a conexão não veio do
+proxy" por até 30 s. Isso não é ataque; o endereço recusado aparece no
+`motivo` e no log (um aviso por minuto por origem, com a contagem dos
+suprimidos).
+
 Testado localmente em 25/09/2026 com a imagem `oauth2-proxy:v7.15.4`, com as
 mesmas opções de cabeçalho de produção, um emissor OIDC falso e um upstream que
 devolve os headers recebidos:
@@ -130,8 +138,9 @@ quem escreve no volume é membro do projeto, e membro do projeto lê as
 variáveis.
 
 **Âncora fora do volume:** cada gravação escreve no log da aplicação o hash da
-linha nova (`Trilha de auditoria: evento … gravado, hash …`), e cada início do
-serviço escreve a cabeça que leu do disco. O log do Railway não se edita pelo
+linha nova (`Trilha de auditoria: evento … gravado, hash …`), e o serviço, assim
+que sobe, escreve a cabeça que leu do disco (`Trilha de auditoria: cabeça lida
+do disco, hash …`), mesmo que ninguém assine depois. O log do Railway não se edita pelo
 volume. Para conferir a trilha, compare o hash de cada linha com o log; uma
 cabeça lida no início que não seja o último hash gravado antes dele indica
 edição. A retenção do log do Railway é limitada; a âncora definitiva é a cópia
@@ -142,6 +151,12 @@ linha incompleta. A gravação seguinte começa numa linha nova e se encadeia à
 última linha completa. A consulta mostra a incompleta em `integridade.avisos`,
 sem dar a cadeia por quebrada. A cadeia só é dada por quebrada quando a linha
 seguinte não pula por cima da incompleta.
+
+Linha cortada nunca é JSON válido (`hash_anterior` é o último campo, e falta o
+`}`). Por isso um evento **inteiro** sem `hash_anterior` não é tratado como
+gravação interrompida: é linha posta por fora da aplicação, **quebra a cadeia**
+ali e fica fora da consulta. Como não muda nenhuma linha existente, a âncora no
+log não o acusaria; quem acusa é a cadeia.
 
 **Retenção:** 5 anos (prazo tributário). A aplicação nunca apaga; o expurgo de
 arquivos com mais de 5 anos é manual.

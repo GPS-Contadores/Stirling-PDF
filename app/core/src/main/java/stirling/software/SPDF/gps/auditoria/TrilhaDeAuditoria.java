@@ -23,6 +23,8 @@ import java.util.stream.Stream;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import lombok.extern.slf4j.Slf4j;
@@ -50,7 +52,8 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>Uma gravação interrompida (kill, disco cheio) deixa uma linha incompleta. A gravação seguinte
  * começa numa linha nova e se encadeia à última linha completa, e {@link #verificar()} mostra a
- * incompleta como aviso, não como quebra.
+ * incompleta como aviso, não como quebra. Linha cortada nunca é JSON válido; um evento inteiro sem
+ * {@code hash_anterior} não é gravação interrompida, foi posto por fora, e quebra a cadeia.
  *
  * <p>Uma instância só grava por vez ({@code synchronized}); o Stirling roda em réplica única. A
  * leitura não trava a gravação: o arquivo só cresce, e a linha que estiver sendo escrita aparece
@@ -75,7 +78,9 @@ public class TrilhaDeAuditoria {
                     .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
                     .build();
 
-    /** Hash da última linha gravada; lido do disco na primeira gravação. */
+    /**
+     * Hash da última linha da cadeia; lido do disco quando o serviço sobe ou na primeira gravação.
+     */
     private String ultimoHash;
 
     @Autowired
@@ -90,6 +95,24 @@ public class TrilhaDeAuditoria {
     TrilhaDeAuditoria(Path diretorio, Clock relogio) {
         this.diretorio = diretorio;
         this.relogio = relogio;
+    }
+
+    /**
+     * Escreve no log a cabeça da cadeia assim que o serviço sobe, e não só na primeira gravação:
+     * editar a última linha e reiniciar aparece no log mesmo que ninguém assine depois.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public synchronized void anunciarCabeca() {
+        if (ultimoHash != null) {
+            return;
+        }
+        try {
+            ultimoHash = hashDaUltimaLinha();
+            log.info("Trilha de auditoria: cabeça lida do disco, hash {}", ultimoHash);
+        } catch (IOException e) {
+            // A primeira gravação tenta de novo, e falha a assinatura se ainda não conseguir ler.
+            log.error("Trilha de auditoria: não foi possível ler a cabeça da cadeia", e);
+        }
     }
 
     /** Carimba id, data/hora e hash anterior, grava e devolve o evento como ficou no arquivo. */
@@ -135,8 +158,9 @@ public class TrilhaDeAuditoria {
                     continue;
                 }
                 EventoDeAuditoria evento = evento(linhas.get(j));
-                // Linha corrompida ou incompleta: a consulta segue, e verificar() acusa.
-                if (evento != null && filtro.test(evento)) {
+                // Linha corrompida, incompleta ou sem elo na cadeia: fica fora da consulta, e
+                // verificar() acusa.
+                if (evento != null && evento.hashAnterior() != null && filtro.test(evento)) {
                     encontrados.add(evento);
                 }
             }
@@ -167,9 +191,20 @@ public class TrilhaDeAuditoria {
                         continue;
                     }
                     EventoDeAuditoria evento = evento(linha);
-                    if (evento == null || evento.hashAnterior() == null) {
+                    if (evento == null) {
+                        // Linha cortada nunca é JSON válido: hash_anterior é o último campo.
                         incompletas.add(new Posicao(arquivo, numero));
                         continue;
+                    }
+                    if (evento.hashAnterior() == null) {
+                        // Evento inteiro sem elo: não sai de gravação interrompida, foi posto
+                        // por fora. Não muda nenhuma linha existente, então só a cadeia o acusa.
+                        return Integridade.quebrada(
+                                eventos,
+                                arquivo,
+                                numero,
+                                "evento sem hash_anterior (inserido por fora da aplicação)",
+                                avisos);
                     }
                     if (!anterior.equals(evento.hashAnterior())) {
                         return incompletas.isEmpty()
@@ -259,8 +294,10 @@ public class TrilhaDeAuditoria {
         for (int i = arquivos.size() - 1; i >= 0; i--) {
             List<String> linhas = Files.readAllLines(arquivos.get(i), StandardCharsets.UTF_8);
             for (int j = linhas.size() - 1; j >= 0; j--) {
-                // Pula a linha incompleta de uma gravação interrompida.
-                if (!linhas.get(j).isBlank() && evento(linhas.get(j)) != null) {
+                // Mesmo critério do verificar(): pula a linha incompleta de uma gravação
+                // interrompida e o evento sem elo, que nunca entraram na cadeia.
+                EventoDeAuditoria evento = linhas.get(j).isBlank() ? null : evento(linhas.get(j));
+                if (evento != null && evento.hashAnterior() != null) {
                     return sha256(linhas.get(j));
                 }
             }

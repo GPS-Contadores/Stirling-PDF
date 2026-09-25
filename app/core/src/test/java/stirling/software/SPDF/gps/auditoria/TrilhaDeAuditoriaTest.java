@@ -239,4 +239,60 @@ class TrilhaDeAuditoriaTest {
         assertThat(trilha.verificar().integra()).isTrue();
         assertThat(trilha.consultar(e -> true, 10)).isEmpty();
     }
+
+    /** JSON válido e completo, sem hash_anterior: o que se insere à mão no volume (review N1). */
+    private static final String FORJADO =
+            "{\"id\":\"forjado\",\"quando\":\"2026-09-24T12:30:00Z\","
+                    + "\"usuario\":{\"email\":\"diretor@x\"},\"resultado\":\"sucesso\"}";
+
+    @Test
+    void eventoSemHashAnteriorNoMeioQuebraACadeiaEFicaForaDaConsulta() throws Exception {
+        TrilhaDeAuditoria trilha = new TrilhaDeAuditoria(dir, em("2026-09-24T12:00:00Z"));
+        trilha.registrar(evento("a@x", "a.pdf"));
+        trilha.registrar(evento("b@x", "b.pdf"));
+        Path arquivo = dir.resolve("assinaturas-2026-09.jsonl");
+        List<String> linhas = new ArrayList<>(Files.readAllLines(arquivo));
+        // Nenhuma linha existente muda: todo hash ancorado no log continua batendo.
+        linhas.add(1, FORJADO);
+        Files.write(arquivo, linhas, StandardCharsets.UTF_8);
+
+        TrilhaDeAuditoria.Integridade integridade = trilha.verificar();
+        assertThat(integridade.integra()).isFalse();
+        assertThat(integridade.linha()).isEqualTo(2);
+        assertThat(integridade.detalhe()).contains("evento sem hash_anterior");
+        assertThat(trilha.consultar(e -> true, 10))
+                .extracting(e -> e.usuario().email())
+                .containsExactly("b@x", "a@x");
+    }
+
+    @Test
+    void eventoSemHashAnteriorNoFimNaoViraCabecaNoReinicio() throws Exception {
+        new TrilhaDeAuditoria(dir, em("2026-09-24T12:00:00Z")).registrar(evento("a@x", "a.pdf"));
+        Path arquivo = dir.resolve("assinaturas-2026-09.jsonl");
+        String legitima = Files.readAllLines(arquivo).get(0);
+        Files.writeString(arquivo, FORJADO + "\n", java.nio.file.StandardOpenOption.APPEND);
+
+        EventoDeAuditoria depois =
+                new TrilhaDeAuditoria(dir, em("2026-09-24T13:00:00Z"))
+                        .registrar(evento("b@x", "b.pdf"));
+
+        assertThat(depois.hashAnterior()).isEqualTo(TrilhaDeAuditoria.sha256(legitima));
+        TrilhaDeAuditoria.Integridade integridade =
+                new TrilhaDeAuditoria(dir, Clock.systemUTC()).verificar();
+        assertThat(integridade.integra()).isFalse();
+        assertThat(integridade.linha()).isEqualTo(2);
+    }
+
+    @Test
+    void anunciarACabecaNaSubidaNaoMudaACadeia() throws Exception {
+        new TrilhaDeAuditoria(dir, em("2026-09-24T12:00:00Z")).registrar(evento("a@x", "a.pdf"));
+        TrilhaDeAuditoria reiniciada = new TrilhaDeAuditoria(dir, em("2026-09-24T13:00:00Z"));
+
+        reiniciada.anunciarCabeca();
+        reiniciada.registrar(evento("b@x", "b.pdf"));
+
+        assertThat(reiniciada.verificar().integra()).isTrue();
+        assertThat(reiniciada.verificar().eventos()).isEqualTo(2);
+        new TrilhaDeAuditoria(dir.resolve("vazio"), Clock.systemUTC()).anunciarCabeca();
+    }
 }
