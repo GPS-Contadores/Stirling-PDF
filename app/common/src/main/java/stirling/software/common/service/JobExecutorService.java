@@ -192,6 +192,15 @@ public class JobExecutorService {
                         .body(Map.of("error", "Job timed out after " + timeoutToUse + " ms"));
             } catch (RuntimeException e) {
                 Throwable cause = e.getCause();
+                // GPS: status explícito (ex.: 403 da trilha de auditoria) chega ao cliente pelo
+                // GlobalExceptionHandler em vez de virar 500 "Job failed".
+                if (e instanceof org.springframework.web.server.ResponseStatusException) {
+                    throw e;
+                }
+                if (cause
+                        instanceof org.springframework.web.server.ResponseStatusException status) {
+                    throw status;
+                }
                 if (e instanceof IllegalArgumentException
                         || cause
                                 instanceof
