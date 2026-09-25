@@ -1,0 +1,22 @@
+# Marcador de escopo do ai-memory. Gerado por bin/init-project.sh.
+#
+# ATENÇÃO ao formato: o parser dos hooks é LINHA A LINHA e IGNORA cabeçalhos de
+# seção. As chaves têm de estar na raiz, exatamente com estes nomes. Um bloco
+# como `[project]` seguido de `name = "..."` é silenciosamente ignorado — o
+# arquivo existe, parece certo e não faz nada.
+#
+# Chaves reconhecidas pelo ai-memory 1.24.0 (verificado em hooks/_lib.sh):
+#   project                 nome lógico do projeto na memória
+#   workspace               workspace ao qual o projeto pertence
+#   project_strategy        "repo-root" | "basename"
+#   drop_subagent_captures  "true" descarta observações de subagentes
+#
+# NÃO existem `[privacy] exclude_paths` nem `[session] briefing`. A redação de
+# segredos é server-side, via `sanitizer.extra_patterns` no config.toml do
+# servidor — ver docs/GOVERNANCA.md.
+
+project = "st-gate"
+
+# Um repositório = um projeto na memória: subpastas e worktrees colapsam no
+# mesmo escopo, em vez de virarem projetos soltos.
+project_strategy = "repo-root"
