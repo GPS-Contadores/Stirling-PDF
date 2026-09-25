@@ -51,6 +51,10 @@ export const shouldProcessFilesSeparately = (
         ["txt", "rtf", "csv", "xlsx", "ofx"].includes(
           parameters.toExtension,
         )) ||
+      // Payroll sheet to RUBI TXT: each sheet is its own import (and may
+      // already come back as a zip with one TXT per company)
+      (parameters.fromExtension === "xlsx" &&
+        parameters.toExtension === "rubi") ||
       // PDF to CBR conversions (each PDF should generate its own archive)
       (parameters.fromExtension === "pdf" &&
         parameters.toExtension === "cbr") ||
@@ -99,6 +103,7 @@ export const buildConvertFormData = (
     cbzOutputOptions,
     ebookOptions,
     epubOptions,
+    rubiOptions,
   } = parameters;
 
   selectedFiles.forEach((file) => {
@@ -160,6 +165,11 @@ export const buildConvertFormData = (
     formData.append("pageNumbers", "all");
   } else if (fromExtension === "pdf" && toExtension === "xlsx") {
     formData.append("pageNumbers", "all");
+  } else if (fromExtension === "xlsx" && toExtension === "rubi") {
+    // Left out when blank: the service then uses the code in the sheet, and
+    // refuses (pointing at the cell) if neither has one.
+    const calculo = rubiOptions?.calculo?.trim();
+    if (calculo) formData.append("calculo", calculo);
   } else if (fromExtension === "cbr" && toExtension === "pdf") {
     formData.append("optimizeForEbook", cbrOptions.optimizeForEbook.toString());
   } else if (fromExtension === "pdf" && toExtension === "cbr") {
@@ -225,6 +235,10 @@ export const createFileFromResponse = (
   if (targetExtension == "pdfa" || targetExtension == "pdfx") {
     targetExtension = "pdf";
   }
+  // Only a fallback: the RUBI converter names the file (FP_EVENTOS_...).
+  if (targetExtension == "rubi") {
+    targetExtension = "txt";
+  }
 
   const fallbackFilename = `${originalName}.${targetExtension}`;
 
@@ -286,6 +300,8 @@ export interface ConversionSummary {
  * any other converter.
  */
 export const conversionSummary = (headers: any): ConversionSummary | null => {
+  // The RUBI converter also sends X-GPS-Lancamentos; see payrollSummary.
+  if (headers?.["x-gps-arquivos"] !== undefined) return null;
   const entries = headers?.["x-gps-lancamentos"];
   if (typeof entries !== "string" || !/^\d+$/.test(entries)) return null;
   const parser = headers?.["x-gps-parser"];
@@ -296,6 +312,26 @@ export const conversionSummary = (headers: any): ConversionSummary | null => {
     balanceOk:
       balance === "ok" ? true : balance === "divergente" ? false : null,
   };
+};
+
+export interface PayrollSummary {
+  entries: number;
+  /** TXT files generated: one per company (a zip when more than one) */
+  files: number;
+}
+
+/**
+ * What the payroll sheet → RUBI TXT converter says about a successful
+ * conversion: how many entries went into the TXT (X-GPS-Lancamentos) and how
+ * many TXT files came out, one per company (X-GPS-Arquivos). Returns null for
+ * any other converter.
+ */
+export const payrollSummary = (headers: any): PayrollSummary | null => {
+  const entries = headers?.["x-gps-lancamentos"];
+  const files = headers?.["x-gps-arquivos"];
+  if (typeof entries !== "string" || !/^\d+$/.test(entries)) return null;
+  if (typeof files !== "string" || !/^\d+$/.test(files)) return null;
+  return { entries: Number(entries), files: Number(files) };
 };
 
 // Toast bodies don't preserve line breaks, so several messages go in a list.
@@ -353,6 +389,34 @@ const showConversionSummaries = (
   });
 };
 
+const showPayrollSummaries = (
+  summaries: { name: string; summary: PayrollSummary }[],
+) => {
+  if (summaries.length === 0) return;
+  const lines = summaries.map(({ name, summary }) => {
+    const parts = [
+      i18n.t("convert.rubiEntries", "{{count}} entries", {
+        count: summary.entries,
+      }),
+    ];
+    if (summary.files > 1) {
+      parts.push(
+        i18n.t("convert.rubiFiles", "{{count}} files (one per company)", {
+          count: summary.files,
+        }),
+      );
+    }
+    return `${name}: ${parts.join(" · ")}`;
+  });
+  alert({
+    alertType: "success",
+    title: i18n.t("convert.rubiSummaryTitle", "RUBI TXT ready to import"),
+    body: messageList(lines),
+    expandable: false,
+    durationMs: 15000,
+  });
+};
+
 // Static processor that can be used by both the hook and automation executor
 export const convertProcessor = async (
   parameters: ConvertParameters,
@@ -380,6 +444,7 @@ export const convertProcessor = async (
     // Individual processing for complex cases (PDF→image, smart detection, etc.)
     const failures: { name: string; reason: string }[] = [];
     const summaries: { name: string; summary: ConversionSummary }[] = [];
+    const payrollSummaries: { name: string; summary: PayrollSummary }[] = [];
     for (const file of selectedFiles) {
       try {
         const formData = buildConvertFormData(parameters, [file]);
@@ -402,6 +467,9 @@ export const convertProcessor = async (
         showConversionWarnings(file.name, conversionWarnings(response.headers));
         const summary = conversionSummary(response.headers);
         if (summary) summaries.push({ name: file.name, summary });
+        const payroll = payrollSummary(response.headers);
+        if (payroll)
+          payrollSummaries.push({ name: file.name, summary: payroll });
       } catch (error) {
         console.warn(`Failed to convert file ${file.name}:`, error);
         failures.push({
@@ -412,6 +480,7 @@ export const convertProcessor = async (
     }
 
     showConversionSummaries(summaries);
+    showPayrollSummaries(payrollSummaries);
 
     // A failed file used to vanish with only a console warning: the user got
     // the other outputs and no sign that one was missing (a bank statement
