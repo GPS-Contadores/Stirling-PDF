@@ -3,6 +3,7 @@ import {
   useBaseParameters,
   BaseParametersHook,
 } from "@app/hooks/tools/shared/useBaseParameters";
+import { SignatureArea } from "@app/utils/signatureAreaCoordinates";
 
 export interface CertSignParameters extends BaseParameters {
   // Where the signing certificate comes from:
@@ -29,6 +30,8 @@ export interface CertSignParameters extends BaseParameters {
   location: string;
   name: string;
   pageNumber: number;
+  // Box drawn on the page preview; null keeps the default position.
+  signatureArea: SignatureArea | null;
   showLogo: boolean;
 }
 
@@ -41,6 +44,7 @@ export const defaultParameters: CertSignParameters = {
   location: "",
   name: "",
   pageNumber: 1,
+  signatureArea: null,
   showLogo: true,
 };
 

@@ -2246,6 +2246,14 @@ stepTitle = "Aparência da assinatura"
 visibility = "Visibilidade"
 visible = "Visível"
 
+[certSign.appearance.area]
+hint = "Desenhe na página o retângulo onde a assinatura vai aparecer. Sem retângulo, ela vai para a posição padrão."
+hintChosen = "Arraste o retângulo para movê-lo, ou as bordas para mudar o tamanho."
+previewAlt = "Pré-visualização da página {{page}}"
+reset = "Usar a posição padrão"
+title = "Posição da assinatura"
+unavailable = "Pré-visualização da página indisponível"
+
 [certSign.appearance.options]
 title = "Detalhes da assinatura"
 
@@ -2262,7 +2270,7 @@ title = "Assinaturas invisíveis"
 [certSign.appearance.tooltip.visible]
 bullet1 = "Mostra o nome e a data do signatário no documento"
 bullet2 = "Pode incluir o motivo e o local da assinatura"
-bullet3 = "Escolha em qual página posicionar a assinatura"
+bullet3 = "Escolha a página e desenhe onde a assinatura fica"
 bullet4 = "Logo opcional pode ser incluído"
 text = "Exibe um bloco de assinatura no PDF com seu nome, data e detalhes opcionais. Útil quando você quer que os leitores vejam claramente que o documento está assinado."
 title = "Assinaturas visíveis"
@@ -3188,6 +3196,14 @@ pdfOptions = "Opções de PDF"
 pdfToCbr = "PDF → CBR"
 pdfToCbz = "PDF → CBZ"
 pdfToEpub = "PDF → EPUB"
+rubiCalculo = "Código do cálculo"
+rubiCalculoDescription = "Só é usado se a planilha veio com o cálculo em branco. Apenas dígitos."
+rubiEntries_one = "{{count}} lançamento"
+rubiEntries_other = "{{count}} lançamentos"
+rubiFiles_one = "{{count}} arquivo (um por empresa)"
+rubiFiles_other = "{{count}} arquivos (um por empresa)"
+rubiOptions = "Importação no RUBI"
+rubiSummaryTitle = "TXT do RUBI pronto para importar"
 selectSourceFormatFirst = "Selecione primeiro um formato de origem"
 settings = "Configurações"
 single = "Único"
@@ -5033,9 +5049,9 @@ downloading = "Baixando…"
 error = "Erro no OneDrive"
 notProvisioned = "Abra o OneDrive uma vez em office.com e tente de novo."
 openFile = "Abrir"
+saved = "Salvo no OneDrive"
 saveHere = "Salvar aqui"
 saveToOneDrive = "Salvar no OneDrive"
-saved = "Salvo no OneDrive"
 
 [overlay-pdfs]
 desc = "Sobrepor um PDF sobre outro"
@@ -8794,6 +8810,11 @@ renaming = "Renaming:"
 submit = "Rename Team"
 success = "Team renamed successfully"
 title = "Rename Team"
+
+[XLSXToRUBI]
+header = "Planilha de folha para TXT do RUBI"
+tags = "folha,rubi,senior,planilha,xlsx,eventos,dp,converter"
+title = "Planilha de folha para TXT do RUBI (FP-EVENTOS)"
 
 [zipWarning]
 cancel = "Cancel"

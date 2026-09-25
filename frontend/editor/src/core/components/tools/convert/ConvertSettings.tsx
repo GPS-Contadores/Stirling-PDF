@@ -35,6 +35,7 @@ import ConvertToCbrSettings from "@app/components/tools/convert/ConvertToCbrSett
 import ConvertFromEbookSettings from "@app/components/tools/convert/ConvertFromEbookSettings";
 import ConvertFromSvgSettings from "@app/components/tools/convert/ConvertFromSvgSettings";
 import ConvertToEpubSettings from "@app/components/tools/convert/ConvertToEpubSettings";
+import ConvertToRubiSettings from "@app/components/tools/convert/ConvertToRubiSettings";
 import { ConvertParameters } from "@app/hooks/tools/convert/useConvertParameters";
 import {
   FROM_FORMAT_OPTIONS,
@@ -530,6 +531,19 @@ const ConvertSettings = ({
           <>
             <Divider />
             <ConvertToCbrSettings
+              parameters={parameters}
+              onParameterChange={onParameterChange}
+              disabled={disabled}
+            />
+          </>
+        )}
+
+      {/* Payroll sheet to RUBI TXT options */}
+      {parameters.fromExtension === "xlsx" &&
+        parameters.toExtension === "rubi" && (
+          <>
+            <Divider />
+            <ConvertToRubiSettings
               parameters={parameters}
               onParameterChange={onParameterChange}
               disabled={disabled}

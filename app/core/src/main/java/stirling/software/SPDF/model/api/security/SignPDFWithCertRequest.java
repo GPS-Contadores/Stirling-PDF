@@ -89,6 +89,32 @@ public class SignPDFWithCertRequest extends PDFFile {
     private Integer pageNumber;
 
     @Schema(
+            description =
+                    "Left edge of the visible signature area, as a fraction (0-1) of the page"
+                            + " width as displayed (after /Rotate), measured from the left. Send"
+                            + " signatureX, signatureY, signatureWidth and signatureHeight together;"
+                            + " when omitted the signature is placed at the default position.")
+    private Float signatureX;
+
+    @Schema(
+            description =
+                    "Top edge of the visible signature area, as a fraction (0-1) of the page"
+                            + " height as displayed (after /Rotate), measured from the top.")
+    private Float signatureY;
+
+    @Schema(
+            description =
+                    "Width of the visible signature area, as a fraction (0-1] of the page width"
+                            + " as displayed.")
+    private Float signatureWidth;
+
+    @Schema(
+            description =
+                    "Height of the visible signature area, as a fraction (0-1] of the page"
+                            + " height as displayed.")
+    private Float signatureHeight;
+
+    @Schema(
             description = "Whether to visually show a signature logo along with the signature",
             defaultValue = "true",
             requiredMode = Schema.RequiredMode.REQUIRED)
