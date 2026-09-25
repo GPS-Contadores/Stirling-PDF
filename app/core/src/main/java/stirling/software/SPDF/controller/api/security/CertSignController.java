@@ -12,6 +12,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Objects;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.pdfbox.examples.signature.CreateSignatureBase;
@@ -141,7 +142,8 @@ public class CertSignController {
             String name,
             String location,
             String reason,
-            Boolean showLogo) {
+            Boolean showLogo)
+            throws IOException {
         sign(
                 pdfDocumentFactory,
                 input,
@@ -171,7 +173,10 @@ public class CertSignController {
             String location,
             String reason,
             Boolean showLogo,
-            SignatureArea area) {
+            SignatureArea area)
+            throws IOException {
+        // GPS: failures propagate. Upstream caught and logged them here, so the endpoint answered
+        // 200 with an empty PDF (GPS-Contadores/Stirling-PDF#28).
         try (PDDocument doc = pdfDocumentFactory.load(input)) {
             PDSignature signature = new PDSignature();
             signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
@@ -194,8 +199,6 @@ public class CertSignController {
                 doc.addSignature(signature, instance);
                 doc.saveIncremental(output);
             }
-        } catch (Exception e) {
-            ExceptionUtils.logException("PDF signing", e);
         }
     }
 
@@ -342,7 +345,7 @@ public class CertSignController {
                     reason,
                     showLogo,
                     signatureArea);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) { // GPS: sign() now throws both
             signedOut.close();
             throw e;
         } finally {
@@ -644,7 +647,9 @@ public class CertSignController {
                     String name = IETFUtils.valueToString(cn.getFirst().getValue());
 
                     String date = signature.getSignDate().getTime().toString();
-                    String reason = signature.getReason();
+                    // GPS: reason is optional in the API (the UI always sends ""); null made
+                    // showText throw.
+                    String reason = Objects.toString(signature.getReason(), "");
 
                     cs.showText("Signed by " + name);
                     cs.newLine();
