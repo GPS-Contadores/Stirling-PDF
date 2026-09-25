@@ -1,11 +1,19 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   buildConvertFormData,
   conversionSummary,
+  convertProcessor,
   createFileFromResponse,
   payrollSummary,
   shouldProcessFilesSeparately,
 } from "@app/hooks/tools/convert/useConvertOperation";
+import apiClient from "@app/services/apiClient";
+import { alert } from "@app/components/toast";
+
+vi.mock("@app/services/apiClient", () => ({
+  default: { post: vi.fn() },
+}));
+vi.mock("@app/components/toast", () => ({ alert: vi.fn() }));
 import { defaultParameters } from "@app/hooks/tools/convert/useConvertParameters";
 import {
   getAvailableToExtensions,
@@ -113,5 +121,33 @@ describe("createFileFromResponse for the RUBI TXT", () => {
       "rubi",
     );
     expect(file.name).toBe("Folha ACME.txt");
+  });
+});
+
+describe("convertProcessor with a single sheet", () => {
+  test("shows the RUBI summary, not only when several sheets go together", async () => {
+    // One file takes the batch path, which used to show no summary at all.
+    vi.mocked(apiClient.post).mockResolvedValueOnce({
+      data: new Blob(["x"]),
+      headers: {
+        "content-type": "text/plain; charset=windows-1252",
+        "content-disposition":
+          'form-data; name="attachment"; filename="FP_EVENTOS_0150_202607_fixo.txt"',
+        "x-gps-lancamentos": "7",
+        "x-gps-arquivos": "1",
+      },
+    } as unknown as Awaited<ReturnType<typeof apiClient.post>>);
+
+    const result = await convertProcessor(params(), [sheet()]);
+
+    expect(result.files.map((f) => f.name)).toEqual([
+      "FP_EVENTOS_0150_202607_fixo.txt",
+    ]);
+    expect(vi.mocked(alert)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alertType: "success",
+        title: expect.stringContaining("RUBI"),
+      }),
+    );
   });
 });

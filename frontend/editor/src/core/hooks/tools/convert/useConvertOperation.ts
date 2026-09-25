@@ -519,6 +519,12 @@ export const convertProcessor = async (
     );
     processedFiles.push(convertedFile);
     showConversionWarnings(baseFilename, conversionWarnings(response.headers));
+    // A single sheet takes this path, not the per-file loop above, and one
+    // sheet is the usual case: without this the RUBI summary never showed.
+    const payroll = payrollSummary(response.headers);
+    if (payroll) {
+      showPayrollSummaries([{ name: baseFilename, summary: payroll }]);
+    }
   }
 
   // When batch processing multiple files into one output (e.g., 3 images → 1 PDF),
