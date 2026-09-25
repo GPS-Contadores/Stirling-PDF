@@ -2247,12 +2247,12 @@ visibility = "Visibility"
 visible = "Visible"
 
 [certSign.appearance.area]
-hint = "Draw a box on the page where the signature should appear. Without one, the signature goes to the default position."
-hintChosen = "Drag the box to move it, or its edges to resize it."
-previewAlt = "Preview of page {{page}}"
+boxLabel = "Digital signature"
+hint = "In the viewer, draw a box on the page where the signature should appear, or click to drop one. Without one, the signature goes to the default position."
+hintChosen = "The signature goes in the box on page {{page}}. Drag it to move it, or its corners to resize it; draw on another page to move it there."
+openViewer = "Open the viewer"
 reset = "Use default position"
 title = "Signature position"
-unavailable = "Page preview unavailable"
 
 [certSign.appearance.options]
 title = "Signature Details"

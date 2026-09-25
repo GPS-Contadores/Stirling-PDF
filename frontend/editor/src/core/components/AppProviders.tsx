@@ -21,6 +21,7 @@ import { WorkbenchBarProvider } from "@app/contexts/WorkbenchBarContext";
 import { ViewerProvider } from "@app/contexts/ViewerContext";
 import { SignatureProvider } from "@app/contexts/SignatureContext";
 import { SigningOverlayProvider } from "@app/contexts/SigningOverlayContext";
+import { CertSignatureAreaProvider } from "@app/contexts/CertSignatureAreaContext";
 import { AnnotationProvider } from "@app/contexts/AnnotationContext";
 import { TourOrchestrationProvider } from "@app/contexts/TourOrchestrationContext";
 import { AdminTourOrchestrationProvider } from "@app/contexts/AdminTourOrchestrationContext";
@@ -159,7 +160,9 @@ export function AppProviders({
                                               <TourOrchestrationProvider>
                                                 <AdminTourOrchestrationProvider>
                                                   <FolderFileContextProvider>
-                                                    {children}
+                                                    <CertSignatureAreaProvider>
+                                                      {children}
+                                                    </CertSignatureAreaProvider>
                                                   </FolderFileContextProvider>
                                                 </AdminTourOrchestrationProvider>
                                               </TourOrchestrationProvider>
