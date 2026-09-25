@@ -72,6 +72,10 @@ export interface ConvertParameters extends BaseParameters {
     targetDevice: string;
     outputFormat: string;
   };
+  rubiOptions?: {
+    /** RUBI calculation code; only used where the sheet left it blank */
+    calculo: string;
+  };
   isSmartDetection: boolean;
   smartDetectionType: "mixed" | "images" | "web" | "none";
 }
@@ -133,6 +137,9 @@ export const defaultParameters: ConvertParameters = {
     detectChapters: true,
     targetDevice: "TABLET_PHONE_IMAGES",
     outputFormat: "EPUB",
+  },
+  rubiOptions: {
+    calculo: "",
   },
   isSmartDetection: false,
   smartDetectionType: "none",
