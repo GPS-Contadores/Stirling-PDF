@@ -69,8 +69,12 @@ public class FiltroIdentidadeDoProxy extends OncePerRequestFilter {
     }
 
     /**
-     * A cadeia inteira do {@code X-Forwarded-For} (o primeiro é o cliente segundo a borda), ou o
-     * endereço da conexão quando ninguém repassou.
+     * A cadeia inteira do {@code X-Forwarded-For}, ou o endereço da conexão quando ninguém
+     * repassou.
+     *
+     * <p>Os primeiros itens podem ter sido escritos pelo próprio cliente: o oauth2-proxy mantém o
+     * {@code X-Forwarded-For} recebido e só acrescenta o dele (visto no v7.15.4). Confiáveis são os
+     * itens acrescentados pela borda do Railway e pelo proxy, no fim da cadeia.
      */
     private static String ip(HttpServletRequest request) {
         String encaminhado = request.getHeader("X-Forwarded-For");

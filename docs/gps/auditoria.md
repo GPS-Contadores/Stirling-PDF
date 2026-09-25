@@ -34,6 +34,26 @@ Esses headers só são confiáveis porque:
   (`PreserveRequestValue: false` em `getPassUserHeaders`, `stripHeaders` em
   `pkg/middleware/headers.go`).
 
+Testado localmente em 25/09/2026 com a imagem `oauth2-proxy:v7.15.4`, com as
+mesmas opções de cabeçalho de produção, um emissor OIDC falso e um upstream que
+devolve os headers recebidos:
+
+- sem login, a requisição recebe 302 para o login e não chega ao upstream;
+- com login de `verdadeiro@…` e `X-Forwarded-Email`, `-User`,
+  `-Preferred-Username` e `-Groups` forjados, os quatro chegam com os valores
+  do login.
+
+O teste usou sessão por token no `Authorization`; em produção a sessão é por
+cookie do Entra. Pelo código, a troca dos headers é o mesmo middleware nos dois
+casos; com cookie do Entra não foi testado.
+
+**O IP não é confiável do mesmo jeito.** O proxy mantém o `X-Forwarded-For`
+que o cliente mandar e só acrescenta o dele: um `X-Forwarded-For: 6.6.6.6`
+forjado chegou como `6.6.6.6, 172.21.0.1`. A trilha grava a cadeia inteira, e
+os primeiros itens podem ser inventados. Confiáveis são os itens do fim, postos
+pela borda do Railway e pelo proxy. O próprio proxy avisa no log que, sem
+`--trusted-proxy-ip`, confia no `X-Forwarded-*` de qualquer origem.
+
 **Assinatura sem `X-Forwarded-Email` é negada** (403) e registrada como
 `negado`. No docker-compose local, a porta 8080 pula o proxy: para assinar por
 ela, defina `GPS_AUDITORIA_EXIGIRIDENTIDADE=false` (nunca no Railway).
