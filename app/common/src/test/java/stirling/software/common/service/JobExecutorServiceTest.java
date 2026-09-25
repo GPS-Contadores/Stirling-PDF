@@ -142,6 +142,22 @@ class JobExecutorServiceTest {
     }
 
     @Test
+    void shouldRethrowResponseStatusExceptionFromSyncJob() {
+        Supplier<Object> work =
+                () -> {
+                    throw new org.springframework.web.server.ResponseStatusException(
+                            HttpStatus.FORBIDDEN, "negado");
+                };
+
+        org.springframework.web.server.ResponseStatusException thrown =
+                org.junit.jupiter.api.Assertions.assertThrows(
+                        org.springframework.web.server.ResponseStatusException.class,
+                        () -> jobExecutorService.runJobGeneric(false, work));
+
+        assertEquals(HttpStatus.FORBIDDEN, thrown.getStatusCode());
+    }
+
+    @Test
     void shouldQueueJobWhenResourcesLimited() throws Exception {
         // Given
         Supplier<Object> work = () -> "test-result";
