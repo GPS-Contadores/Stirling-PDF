@@ -2,6 +2,8 @@ package stirling.software.SPDF.gps.auditoria;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
@@ -19,13 +21,45 @@ class FiltroIdentidadeDoProxyTest {
 
     private static IdentidadeDoProxy passarPeloFiltro(MockHttpServletRequest request)
             throws Exception {
+        return passarPeloFiltro(FiltroIdentidadeDoProxy.QUALQUER_ORIGEM, request, null);
+    }
+
+    /**
+     * No teste o par da conexão é o {@code remoteAddr} do mock; no Jetty é o socket ({@link
+     * FiltroIdentidadeDoProxy#parNoJetty}).
+     */
+    private static IdentidadeDoProxy passarPeloFiltro(
+            String origens, MockHttpServletRequest request, AtomicReference<String> recusada)
+            throws Exception {
         AtomicReference<IdentidadeDoProxy> vista = new AtomicReference<>();
-        new FiltroIdentidadeDoProxy()
+        new FiltroIdentidadeDoProxy(origens, r -> endereco(r.getRemoteAddr()))
                 .doFilter(
                         request,
                         new MockHttpServletResponse(),
-                        (req, res) -> vista.set(IdentidadeDoProxy.doMdc()));
+                        (req, res) -> {
+                            vista.set(IdentidadeDoProxy.doMdc());
+                            if (recusada != null) {
+                                recusada.set(IdentidadeDoProxy.origemRecusada());
+                            }
+                        });
         return vista.get();
+    }
+
+    private static InetAddress endereco(String ip) {
+        try {
+            return InetAddress.getByName(ip);
+        } catch (UnknownHostException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static MockHttpServletRequest comIdentidade(String par) {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/x");
+        request.setRemoteAddr(par);
+        request.addHeader("X-Forwarded-Email", "auditor@gestao.com.br");
+        request.addHeader("X-Forwarded-Groups", "Documentos.Auditor");
+        request.addHeader("X-Forwarded-For", "10.9.9.9");
+        return request;
     }
 
     @Test
@@ -69,5 +103,45 @@ class FiltroIdentidadeDoProxyTest {
                 passarPeloFiltro(new MockHttpServletRequest("POST", "/api/v1/x"));
 
         assertThat(identidade.presente()).isFalse();
+    }
+
+    @Test
+    void identidadeDeOutraOrigemEIgnoradaEOIpEODoSocket() throws Exception {
+        AtomicReference<String> recusada = new AtomicReference<>();
+
+        IdentidadeDoProxy identidade =
+                passarPeloFiltro("127.0.0.1", comIdentidade("fd12::6"), recusada);
+
+        assertThat(identidade.presente()).isFalse();
+        assertThat(identidade.grupos()).isEmpty();
+        assertThat(identidade.ip()).isEqualTo(endereco("fd12::6").getHostAddress());
+        assertThat(recusada.get()).isEqualTo(identidade.ip());
+    }
+
+    @Test
+    void proxyConfiavelPeloNomeQueResolveParaOPar() throws Exception {
+        IdentidadeDoProxy identidade =
+                passarPeloFiltro(" outro.invalid , localhost", comIdentidade("127.0.0.1"), null);
+
+        assertThat(identidade.email()).isEqualTo("auditor@gestao.com.br");
+        assertThat(identidade.grupos()).containsExactly("Documentos.Auditor");
+        assertThat(identidade.ip()).isEqualTo("10.9.9.9");
+    }
+
+    @Test
+    void semProxyConfiguradoNinguemTemIdentidade() throws Exception {
+        assertThat(passarPeloFiltro("", comIdentidade("127.0.0.1"), null).presente()).isFalse();
+    }
+
+    @Test
+    void semParConhecidoNaoHaIdentidade() throws Exception {
+        AtomicReference<IdentidadeDoProxy> vista = new AtomicReference<>();
+        new FiltroIdentidadeDoProxy("*", r -> null)
+                .doFilter(
+                        comIdentidade("127.0.0.1"),
+                        new MockHttpServletResponse(),
+                        (req, res) -> vista.set(IdentidadeDoProxy.doMdc()));
+
+        assertThat(vista.get().presente()).isFalse();
     }
 }

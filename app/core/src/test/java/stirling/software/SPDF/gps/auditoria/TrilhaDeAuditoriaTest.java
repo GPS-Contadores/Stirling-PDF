@@ -143,6 +143,97 @@ class TrilhaDeAuditoriaTest {
     }
 
     @Test
+    void gravacaoInterrompidaViraAvisoEAProximaLinhaSeEncadeiaAUltimaCompleta() throws Exception {
+        TrilhaDeAuditoria trilha = new TrilhaDeAuditoria(dir, em("2026-09-24T12:00:00Z"));
+        trilha.registrar(evento("a@gestao.com.br", "a.pdf"));
+        Path arquivo = dir.resolve("assinaturas-2026-09.jsonl");
+        // kill ou disco cheio no meio do append: linha sem fim e sem quebra.
+        Files.writeString(
+                arquivo,
+                "{\"id\":\"x\",\"quando\":\"2026",
+                java.nio.file.StandardOpenOption.APPEND);
+
+        TrilhaDeAuditoria.Integridade antes = trilha.verificar();
+        assertThat(antes.integra()).isTrue();
+        assertThat(antes.avisos())
+                .containsExactly(
+                        "assinaturas-2026-09.jsonl linha 2: linha incompleta no fim da trilha");
+
+        trilha.registrar(evento("b@gestao.com.br", "b.pdf"));
+        new TrilhaDeAuditoria(dir, em("2026-09-24T13:00:00Z"))
+                .registrar(evento("c@gestao.com.br", "c.pdf"));
+
+        List<String> linhas = Files.readAllLines(arquivo);
+        assertThat(linhas).hasSize(4);
+        assertThat(linhas.get(2)).startsWith("{\"id\":");
+        TrilhaDeAuditoria.Integridade depois = trilha.verificar();
+        assertThat(depois.integra()).isTrue();
+        assertThat(depois.eventos()).isEqualTo(3);
+        assertThat(depois.avisos())
+                .containsExactly(
+                        "assinaturas-2026-09.jsonl linha 2: gravação interrompida, linha fora da cadeia");
+        assertThat(trilha.consultar(e -> true, 10)).hasSize(3);
+    }
+
+    @Test
+    void lixoNoLugarDeUmaLinhaQuebraACadeiaNaqueleLugar() throws Exception {
+        TrilhaDeAuditoria trilha = new TrilhaDeAuditoria(dir, em("2026-09-24T12:00:00Z"));
+        for (int i = 0; i < 3; i++) {
+            trilha.registrar(evento("a@gestao.com.br", "doc" + i + ".pdf"));
+        }
+        Path arquivo = dir.resolve("assinaturas-2026-09.jsonl");
+        List<String> linhas = new ArrayList<>(Files.readAllLines(arquivo));
+        linhas.set(1, "{\"id\":\"apagada");
+        Files.write(arquivo, linhas, StandardCharsets.UTF_8);
+
+        TrilhaDeAuditoria.Integridade integridade = trilha.verificar();
+        assertThat(integridade.integra()).isFalse();
+        assertThat(integridade.linha()).isEqualTo(2);
+        assertThat(integridade.detalhe()).isEqualTo("linha não é um evento válido");
+    }
+
+    /**
+     * Limite conhecido (doc e javadoc): sem chave, a última linha editada antes de um reinício vira
+     * a cabeça da cadeia. Quem acusa é o hash no log de cada gravação, e depois a #20.
+     */
+    @Test
+    void editarAUltimaLinhaEReiniciarNaoQuebraACadeia() throws Exception {
+        TrilhaDeAuditoria trilha = new TrilhaDeAuditoria(dir, em("2026-09-24T12:00:00Z"));
+        trilha.registrar(evento("a@gestao.com.br", "a.pdf"));
+        trilha.registrar(evento("a@gestao.com.br", "b.pdf"));
+        Path arquivo = dir.resolve("assinaturas-2026-09.jsonl");
+        List<String> linhas = new ArrayList<>(Files.readAllLines(arquivo));
+        linhas.set(1, linhas.get(1).replace("b.pdf", "outro.pdf"));
+        Files.write(arquivo, linhas, StandardCharsets.UTF_8);
+
+        new TrilhaDeAuditoria(dir, em("2026-09-24T13:00:00Z"))
+                .registrar(evento("a@gestao.com.br", "c.pdf"));
+
+        assertThat(trilha.verificar().integra()).isTrue();
+    }
+
+    @Test
+    void dataAdulteradaFicaForaDoPeriodoSemDerrubarAConsulta() throws Exception {
+        TrilhaDeAuditoria trilha = new TrilhaDeAuditoria(dir, em("2026-09-24T12:00:00Z"));
+        trilha.registrar(evento("a@gestao.com.br", "a.pdf"));
+        Path arquivo = dir.resolve("assinaturas-2026-09.jsonl");
+        Files.writeString(
+                arquivo, Files.readString(arquivo).replace("2026-09-24T12:00:00Z", "ontem"));
+
+        assertThat(
+                        trilha.consultar(
+                                new FiltroDaConsulta(
+                                        null,
+                                        null,
+                                        null,
+                                        LocalDate.of(2026, 9, 1),
+                                        LocalDate.of(2026, 9, 30)),
+                                10))
+                .isEmpty();
+        assertThat(trilha.consultar(e -> true, 10)).hasSize(1);
+    }
+
+    @Test
     void semArquivoATrilhaEstaIntegraEVazia() throws Exception {
         TrilhaDeAuditoria trilha = new TrilhaDeAuditoria(dir.resolve("nada"), Clock.systemUTC());
         assertThat(trilha.verificar().integra()).isTrue();

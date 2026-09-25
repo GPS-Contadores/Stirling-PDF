@@ -21,9 +21,17 @@ public record IdentidadeDoProxy(
     static final String MDC_GRUPOS = "gps.proxy.grupos";
     static final String MDC_IP = "gps.proxy.ip";
 
+    /** Quem mandou headers de identidade sem ser o proxy ({@link FiltroIdentidadeDoProxy}). */
+    static final String MDC_ORIGEM_RECUSADA = "gps.proxy.origemRecusada";
+
     /** Sem e-mail não há identidade: o proxy sempre repassa o e-mail do Entra. */
     public boolean presente() {
         return email != null && !email.isBlank();
+    }
+
+    /** Nulo, salvo se a requisição trouxe identidade de fora do proxy. */
+    static String origemRecusada() {
+        return MDC.get(MDC_ORIGEM_RECUSADA);
     }
 
     static IdentidadeDoProxy doMdc() {

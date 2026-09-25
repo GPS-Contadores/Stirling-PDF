@@ -51,11 +51,13 @@ final class AssinaturaDoPdf {
     private AssinaturaDoPdf() {}
 
     /**
-     * O certificado da última assinatura, se ela cobrir o arquivo até o fim (assinatura incremental
-     * recém-feita). Vazio se o PDF não abrir, não tiver assinatura ou a última não chegar ao fim do
-     * arquivo.
+     * O certificado da última assinatura, se ela for nova: cobre o arquivo até o fim e está depois
+     * dos {@code tamanhoDaEntrada} bytes do PDF enviado, na parte que a gravação incremental
+     * acrescentou. Vazio se o PDF não abrir, não tiver assinatura ou a última não for nova (por
+     * exemplo, um PDF já assinado devolvido sem mudança).
      */
-    static Optional<EventoDeAuditoria.Certificado> daUltimaAssinatura(Path pdf) {
+    static Optional<EventoDeAuditoria.Certificado> daUltimaAssinatura(
+            Path pdf, long tamanhoDaEntrada) {
         try (PDDocument doc = Loader.loadPDF(pdf.toFile())) {
             PDSignature assinatura = doc.getLastSignatureDictionary();
             if (assinatura == null) {
@@ -64,6 +66,7 @@ final class AssinaturaDoPdf {
             int[] faixa = assinatura.getByteRange();
             if (faixa == null
                     || faixa.length != 4
+                    || faixa[1] < tamanhoDaEntrada
                     || (long) faixa[2] + faixa[3] != Files.size(pdf)) {
                 return Optional.empty();
             }

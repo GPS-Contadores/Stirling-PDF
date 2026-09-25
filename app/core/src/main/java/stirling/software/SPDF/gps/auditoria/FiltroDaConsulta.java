@@ -66,7 +66,13 @@ record FiltroDaConsulta(
         if (de == null && ate == null) {
             return true;
         }
-        Instant quando = Instant.parse(evento.quando());
+        Instant quando;
+        try {
+            quando = Instant.parse(evento.quando());
+        } catch (RuntimeException e) {
+            // Data adulterada ou ausente: fica fora do período, e verificar() acusa a edição.
+            return false;
+        }
         return (de == null || !quando.isBefore(de.atStartOfDay(BRASILIA).toInstant()))
                 && (ate == null
                         || quando.isBefore(ate.plusDays(1).atStartOfDay(BRASILIA).toInstant()));

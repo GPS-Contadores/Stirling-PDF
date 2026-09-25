@@ -6,6 +6,12 @@ o hash do documento antes e depois. Desenho completo na
 [#16](https://github.com/GPS-Contadores/Stirling-PDF/issues/16); esta parte é a
 [#18](https://github.com/GPS-Contadores/Stirling-PDF/issues/18).
 
+Fica de fora a finalização de sessão de assinatura (`SigningSessionController`,
+em `proprietary/`), que assina pelo `PdfSigningServiceImpl` sem passar pelo
+`cert-sign`. Hoje ela não é alcançável: exige login do próprio Stirling, e o
+GPS Documentos roda com `enableLogin: false`. Se o login do Stirling for
+ligado, esse caminho precisa entrar na trilha antes.
+
 O código fica em `app/core/.../SPDF/gps/auditoria/`, fora de `proprietary/`
 (licença) e fora dos arquivos do upstream, para não conflitar na sincronização.
 A única mudança em arquivo do upstream é uma condição no `JobExecutorService`
@@ -28,7 +34,11 @@ leva para a thread do job em `?async=true`.
 
 Esses headers só são confiáveis porque:
 
-- o Stirling não tem domínio público no Railway: só o proxy chega nele;
+- a conexão vem do proxy: o filtro só aceita os headers quando o par da
+  conexão TCP é um dos endereços de `GPS_AUDITORIA_PROXYCONFIAVEL` (no Railway,
+  `auth-proxy.railway.internal`). Não basta o Stirling não ter domínio público:
+  a rede privada do Railway é aberta aos outros serviços do projeto, e o `ofx`,
+  que lê PDF de cliente, alcança o Stirling direto;
 - o oauth2-proxy (v7.15.4, `PASS_USER_HEADERS=true`) **apaga** o valor que o
   cliente mandar nesses headers antes de pôr o do login
   (`PreserveRequestValue: false` em `getPassUserHeaders`, `stripHeaders` em
@@ -54,9 +64,21 @@ os primeiros itens podem ser inventados. Confiáveis são os itens do fim, posto
 pela borda do Railway e pelo proxy. O próprio proxy avisa no log que, sem
 `--trusted-proxy-ip`, confia no `X-Forwarded-*` de qualquer origem.
 
+O par sai do socket do Jetty, não de `getRemoteAddr()`. Com
+`server.forward-headers-strategy=NATIVE` (padrão do Stirling), o
+`getRemoteAddr()` devolve o `X-Forwarded-For`, que quem chama escreve como
+quiser. Identidade de outra origem é descartada, vai para o log com o endereço
+e, na assinatura, vira linha `negado` com esse endereço no `motivo`.
+
+Um segredo compartilhado injetado pelo proxy (`--basic-auth-password`) não
+serve aqui: o oauth2-proxy põe os mesmos headers em todos os upstreams, e o
+segredo chegaria também ao `ofx`.
+
 **Assinatura sem `X-Forwarded-Email` é negada** (403) e registrada como
 `negado`. No docker-compose local, a porta 8080 pula o proxy: para assinar por
-ela, defina `GPS_AUDITORIA_EXIGIRIDENTIDADE=false` (nunca no Railway).
+ela, defina `GPS_AUDITORIA_EXIGIRIDENTIDADE=false` (nunca no Railway). Pelo
+proxy local, `GPS_AUDITORIA_PROXYCONFIAVEL=auth-proxy` (o nome do serviço no
+compose).
 
 ## Onde grava
 
@@ -89,11 +111,37 @@ volume do `stirling`), um evento JSON por linha, arquivo por mês em UTC.
 
 A aplicação não tem caminho que edite ou apague linha. Cada linha leva em
 `hash_anterior` o SHA-256 da linha anterior (a primeira de todas, 64 zeros),
-numa cadeia única que atravessa os meses. Editar, apagar ou reordenar uma linha
-por fora quebra a cadeia, e a consulta mostra onde.
+numa cadeia única que atravessa os meses.
 
-Limite: apagar as últimas linhas do último arquivo não deixa rastro. Quem
-resolve isso é a cópia fora da máquina (webhook da #20) e o backup do volume.
+**O que a cadeia acusa:** corrupção acidental e edição, remoção ou troca de
+ordem de uma linha no meio do arquivo sem refazer as seguintes. A consulta
+mostra o arquivo e a linha.
+
+**O que ela não acusa:** a cadeia não tem chave. Quem tem acesso de escrita ao
+volume pode:
+
+- recalcular a cadeia inteira com um script;
+- apagar as últimas linhas ou o arquivo do mês mais recente;
+- editar a última linha antes de um reinício (a cabeça da cadeia é relida do
+  disco quando o serviço sobe).
+
+Uma chave (HMAC) guardada em variável de ambiente pouco mudaria no Railway:
+quem escreve no volume é membro do projeto, e membro do projeto lê as
+variáveis.
+
+**Âncora fora do volume:** cada gravação escreve no log da aplicação o hash da
+linha nova (`Trilha de auditoria: evento … gravado, hash …`), e cada início do
+serviço escreve a cabeça que leu do disco. O log do Railway não se edita pelo
+volume. Para conferir a trilha, compare o hash de cada linha com o log; uma
+cabeça lida no início que não seja o último hash gravado antes dele indica
+edição. A retenção do log do Railway é limitada; a âncora definitiva é a cópia
+fora da máquina (webhook da #20), além do backup do volume.
+
+**Gravação interrompida:** kill ou disco cheio no meio da gravação deixa uma
+linha incompleta. A gravação seguinte começa numa linha nova e se encadeia à
+última linha completa. A consulta mostra a incompleta em `integridade.avisos`,
+sem dar a cadeia por quebrada. A cadeia só é dada por quebrada quando a linha
+seguinte não pula por cima da incompleta.
 
 **Retenção:** 5 anos (prazo tributário). A aplicação nunca apaga; o expurgo de
 arquivos com mais de 5 anos é manual.
@@ -110,7 +158,7 @@ arquivos com mais de 5 anos é manual.
 | `de`, `ate` | `AAAA-MM-DD`, dias no horário de Brasília, inclusivos |
 | `limite` | padrão 500, máximo 5000 |
 
-Resposta: `integridade` (`integra`, `eventos`, e onde quebrou), `total` e
+Resposta: `integridade` (`integra`, `eventos`, onde quebrou e `avisos`), `total` e
 `eventos` do mais recente para o mais antigo, no mesmo formato do arquivo.
 
 Acesso só para os e-mails em `GPS_AUDITORIA_LEITORES`; os outros recebem 403.
@@ -121,8 +169,10 @@ Lista vazia fecha para todos. Os papéis admin/auditor da #19 substituem a lista
 | Variável | Padrão | Uso |
 |---|---|---|
 | `GPS_AUDITORIA_LEITORES` | vazio | e-mails que podem consultar, separados por vírgula |
+| `GPS_AUDITORIA_PROXYCONFIAVEL` | vazio | nomes ou IPs de onde a identidade do proxy vale, separados por vírgula; no Railway, `auth-proxy.railway.internal`. Vazio nega toda assinatura; `*` aceita qualquer origem (só desenvolvimento) |
 | `GPS_AUDITORIA_EXIGIRIDENTIDADE` | `true` | `false` só em desenvolvimento sem proxy |
 | `GPS_AUDITORIA_DIRETORIO` | `configs/audit` | outro diretório para a trilha |
 
 Réplica única: a gravação é serializada dentro do processo. Duas réplicas
-escrevendo no mesmo volume quebrariam a cadeia.
+escrevendo no mesmo volume quebrariam a cadeia. A consulta não trava a
+gravação: lê o arquivo, que só cresce, enquanto as assinaturas seguem.

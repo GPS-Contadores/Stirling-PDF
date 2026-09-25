@@ -43,7 +43,10 @@ import stirling.software.SPDF.model.api.security.SignPDFWithCertRequest;
 public class AuditoriaDaAssinaturaAspect {
 
     static final String SEM_IDENTIDADE = "requisição sem identidade do proxy (X-Forwarded-Email)";
+    static final String IDENTIDADE_FORA_DO_PROXY =
+            "identidade recusada: a conexão não veio do proxy";
     static final String SEM_ASSINATURA_NOVA = "o PDF devolvido não traz assinatura nova";
+    static final String SAIDA_ILEGIVEL = "não foi possível conferir o PDF assinado";
     private static final int TAMANHO_MAXIMO_DO_MOTIVO = 300;
 
     private final TrilhaDeAuditoria trilha;
@@ -78,7 +81,14 @@ public class AuditoriaDaAssinaturaAspect {
         Registro registro = new Registro(identidade, ferramenta(pedido));
 
         if (!identidade.presente() && exigirIdentidade) {
-            registro.gravar(arquivoDoCertificado, antes, EventoDeAuditoria.NEGADO, SEM_IDENTIDADE);
+            String origemRecusada = IdentidadeDoProxy.origemRecusada();
+            registro.gravar(
+                    arquivoDoCertificado,
+                    antes,
+                    EventoDeAuditoria.NEGADO,
+                    origemRecusada != null
+                            ? IDENTIDADE_FORA_DO_PROXY + " (" + origemRecusada + ")"
+                            : SEM_IDENTIDADE);
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN, "A assinatura exige login pelo GPS Documentos.");
         }
@@ -87,22 +97,37 @@ public class AuditoriaDaAssinaturaAspect {
         try {
             resultado = ponto.proceed();
         } catch (Throwable falha) {
-            try {
-                registro.gravar(arquivoDoCertificado, antes, EventoDeAuditoria.ERRO, motivo(falha));
-            } catch (IOException naoGravou) {
-                falha.addSuppressed(naoGravou);
-            }
+            gravarErro(registro, arquivoDoCertificado, antes, motivo(falha), falha);
             throw falha;
         }
 
-        Path saida = arquivoDaResposta(resultado);
-        Optional<EventoDeAuditoria.Certificado> certificado =
-                saida != null ? AssinaturaDoPdf.daUltimaAssinatura(saida) : Optional.empty();
-        EventoDeAuditoria.Documento depois =
-                saida != null
-                        ? new EventoDeAuditoria.Documento(
-                                antes.nome(), antes.sha256Antes(), sha256(saida), Files.size(saida))
-                        : antes;
+        Path saida;
+        Optional<EventoDeAuditoria.Certificado> certificado;
+        EventoDeAuditoria.Documento depois;
+        try {
+            saida = arquivoDaResposta(resultado);
+            certificado =
+                    saida != null
+                            ? AssinaturaDoPdf.daUltimaAssinatura(saida, tamanho(pdf))
+                            : Optional.empty();
+            depois =
+                    saida != null
+                            ? new EventoDeAuditoria.Documento(
+                                    antes.nome(),
+                                    antes.sha256Antes(),
+                                    sha256(saida),
+                                    Files.size(saida))
+                            : antes;
+        } catch (IOException | RuntimeException falha) {
+            // A assinatura não é entregue, mas a chamada não pode sumir da trilha.
+            gravarErro(
+                    registro,
+                    arquivoDoCertificado,
+                    antes,
+                    SAIDA_ILEGIVEL + ": " + motivo(falha),
+                    falha);
+            throw falha;
+        }
         if (certificado.isPresent()) {
             EventoDeAuditoria.Certificado c = certificado.get();
             registro.gravar(
@@ -157,6 +182,24 @@ public class AuditoriaDaAssinaturaAspect {
                 throw e;
             }
         }
+    }
+
+    /** Grava o erro sem esconder a falha original se a própria gravação falhar. */
+    private static void gravarErro(
+            Registro registro,
+            EventoDeAuditoria.Certificado certificado,
+            EventoDeAuditoria.Documento documento,
+            String motivo,
+            Throwable falha) {
+        try {
+            registro.gravar(certificado, documento, EventoDeAuditoria.ERRO, motivo);
+        } catch (IOException naoGravou) {
+            falha.addSuppressed(naoGravou);
+        }
+    }
+
+    private static long tamanho(MultipartFile arquivo) {
+        return arquivo != null ? arquivo.getSize() : 0;
     }
 
     private static SignPDFWithCertRequest pedido(Object[] argumentos) {

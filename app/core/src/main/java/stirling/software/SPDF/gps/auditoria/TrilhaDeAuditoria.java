@@ -1,6 +1,9 @@
 package stirling.software.SPDF.gps.auditoria;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +25,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import stirling.software.common.configuration.InstallationPathConfig;
 
 import tools.jackson.databind.DeserializationFeature;
@@ -35,12 +40,23 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>Só acrescenta: não há código que edite ou apague linha. Cada linha leva em {@code
  * hash_anterior} o SHA-256 da linha anterior (a primeira de todas, 64 zeros), numa cadeia única que
- * atravessa os meses. Editar, apagar ou reordenar linha por fora quebra a cadeia, e {@link
- * #verificar()} aponta onde. Truncar o fim do último arquivo não deixa rastro: isso só a cópia fora
- * da máquina (alertas da #20) resolve.
+ * atravessa os meses.
  *
- * <p>Uma instância só grava por vez ({@code synchronized}); o Stirling roda em réplica única.
+ * <p>A cadeia não tem chave: ela acusa corrupção acidental e edição de uma linha no meio sem
+ * refazer as seguintes, e {@link #verificar()} aponta onde. Não acusa quem recalcula a cadeia
+ * inteira, nem edição ou remoção das últimas linhas (a cabeça é relida do disco no reinício). Para
+ * isso cada gravação escreve no log da aplicação o hash da linha nova, fora do volume; a âncora
+ * definitiva é a cópia fora da máquina (#20).
+ *
+ * <p>Uma gravação interrompida (kill, disco cheio) deixa uma linha incompleta. A gravação seguinte
+ * começa numa linha nova e se encadeia à última linha completa, e {@link #verificar()} mostra a
+ * incompleta como aviso, não como quebra.
+ *
+ * <p>Uma instância só grava por vez ({@code synchronized}); o Stirling roda em réplica única. A
+ * leitura não trava a gravação: o arquivo só cresce, e a linha que estiver sendo escrita aparece
+ * como incompleta.
  */
+@Slf4j
 @Service
 public class TrilhaDeAuditoria {
 
@@ -81,25 +97,35 @@ public class TrilhaDeAuditoria {
         Files.createDirectories(diretorio);
         if (ultimoHash == null) {
             ultimoHash = hashDaUltimaLinha();
+            log.info("Trilha de auditoria: cabeça lida do disco, hash {}", ultimoHash);
         }
         Instant agora = relogio.instant();
         EventoDeAuditoria evento =
                 rascunho.carimbar(UUID.randomUUID().toString(), agora.toString(), ultimoHash);
         String linha = json.writeValueAsString(evento);
+        Path arquivo = diretorio.resolve(PREFIXO + MES.format(agora) + ".jsonl");
+        // Gravação anterior interrompida: a linha nova não pode emendar na incompleta.
+        String quebra = terminaNoMeioDeUmaLinha(arquivo) ? "\n" : "";
         Files.writeString(
-                diretorio.resolve(PREFIXO + MES.format(agora) + ".jsonl"),
-                linha + "\n",
+                arquivo,
+                quebra + linha + "\n",
                 StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE,
                 StandardOpenOption.APPEND,
                 StandardOpenOption.SYNC);
         ultimoHash = sha256(linha);
+        // Âncora fora do volume até a #20: quem edita o arquivo não edita o log do Railway.
+        log.info(
+                "Trilha de auditoria: evento {} ({}) gravado, hash {}",
+                evento.id(),
+                evento.resultado(),
+                ultimoHash);
         return evento;
     }
 
     /** Eventos que passam no filtro, do mais recente para o mais antigo, até {@code limite}. */
-    public synchronized List<EventoDeAuditoria> consultar(
-            Predicate<EventoDeAuditoria> filtro, int limite) throws IOException {
+    public List<EventoDeAuditoria> consultar(Predicate<EventoDeAuditoria> filtro, int limite)
+            throws IOException {
         List<EventoDeAuditoria> encontrados = new ArrayList<>();
         List<Path> arquivos = arquivos();
         for (int i = arquivos.size() - 1; i >= 0 && encontrados.size() < limite; i--) {
@@ -108,14 +134,9 @@ public class TrilhaDeAuditoria {
                 if (linhas.get(j).isBlank()) {
                     continue;
                 }
-                EventoDeAuditoria evento;
-                try {
-                    evento = json.readValue(linhas.get(j), EventoDeAuditoria.class);
-                } catch (RuntimeException e) {
-                    // Linha corrompida: a consulta segue, e verificar() acusa.
-                    continue;
-                }
-                if (filtro.test(evento)) {
+                EventoDeAuditoria evento = evento(linhas.get(j));
+                // Linha corrompida ou incompleta: a consulta segue, e verificar() acusa.
+                if (evento != null && filtro.test(evento)) {
                     encontrados.add(evento);
                 }
             }
@@ -123,37 +144,62 @@ public class TrilhaDeAuditoria {
         return encontrados;
     }
 
-    /** Refaz a cadeia de hash de todos os arquivos, na ordem em que foram gravados. */
-    public synchronized Integridade verificar() throws IOException {
+    /**
+     * Refaz a cadeia de hash de todos os arquivos, na ordem em que foram gravados, lendo linha a
+     * linha.
+     *
+     * <p>Linha que não é evento só vira aviso se a linha seguinte se encadear por cima dela, à
+     * última linha completa: é o rastro de uma gravação interrompida, que nunca entrou na cadeia.
+     * No fim da trilha, também é aviso (pode ser a gravação em andamento).
+     */
+    public Integridade verificar() throws IOException {
         String anterior = HASH_INICIAL;
         long eventos = 0;
+        List<Posicao> incompletas = new ArrayList<>();
+        List<String> avisos = new ArrayList<>();
         for (Path arquivo : arquivos()) {
-            List<String> linhas = Files.readAllLines(arquivo, StandardCharsets.UTF_8);
-            for (int i = 0; i < linhas.size(); i++) {
-                String linha = linhas.get(i);
-                if (linha.isBlank()) {
-                    continue;
+            try (BufferedReader leitor = Files.newBufferedReader(arquivo, StandardCharsets.UTF_8)) {
+                String linha;
+                int numero = 0;
+                while ((linha = leitor.readLine()) != null) {
+                    numero++;
+                    if (linha.isBlank()) {
+                        continue;
+                    }
+                    EventoDeAuditoria evento = evento(linha);
+                    if (evento == null || evento.hashAnterior() == null) {
+                        incompletas.add(new Posicao(arquivo, numero));
+                        continue;
+                    }
+                    if (!anterior.equals(evento.hashAnterior())) {
+                        return incompletas.isEmpty()
+                                ? Integridade.quebrada(
+                                        eventos,
+                                        arquivo,
+                                        numero,
+                                        "hash_anterior não confere com a linha anterior (editada,"
+                                                + " apagada ou fora de ordem)",
+                                        avisos)
+                                : Integridade.quebrada(
+                                        eventos,
+                                        incompletas.get(0).arquivo(),
+                                        incompletas.get(0).linha(),
+                                        "linha não é um evento válido",
+                                        avisos);
+                    }
+                    for (Posicao incompleta : incompletas) {
+                        avisos.add(incompleta + ": gravação interrompida, linha fora da cadeia");
+                    }
+                    incompletas.clear();
+                    anterior = sha256(linha);
+                    eventos++;
                 }
-                String declarado;
-                try {
-                    declarado = json.readValue(linha, EventoDeAuditoria.class).hashAnterior();
-                } catch (RuntimeException e) {
-                    return Integridade.quebrada(
-                            eventos, arquivo, i + 1, "linha não é um evento válido");
-                }
-                if (!anterior.equals(declarado)) {
-                    return Integridade.quebrada(
-                            eventos,
-                            arquivo,
-                            i + 1,
-                            "hash_anterior não confere com a linha anterior (editada, apagada ou"
-                                    + " fora de ordem)");
-                }
-                anterior = sha256(linha);
-                eventos++;
             }
         }
-        return new Integridade(true, eventos, null, null, null);
+        for (Posicao incompleta : incompletas) {
+            avisos.add(incompleta + ": linha incompleta no fim da trilha");
+        }
+        return new Integridade(true, eventos, null, null, null, avisos);
     }
 
     /** No mesmo formato das linhas do arquivo, para a consulta não mudar o nome dos campos. */
@@ -161,12 +207,50 @@ public class TrilhaDeAuditoria {
         return json.writeValueAsString(valor);
     }
 
+    /** {@code avisos}: linhas incompletas de gravação interrompida, que não quebram a cadeia. */
     public record Integridade(
-            boolean integra, long eventos, String arquivo, Integer linha, String detalhe) {
+            boolean integra,
+            long eventos,
+            String arquivo,
+            Integer linha,
+            String detalhe,
+            List<String> avisos) {
 
-        static Integridade quebrada(long eventos, Path arquivo, int linha, String detalhe) {
+        static Integridade quebrada(
+                long eventos, Path arquivo, int linha, String detalhe, List<String> avisos) {
             return new Integridade(
-                    false, eventos, arquivo.getFileName().toString(), linha, detalhe);
+                    false, eventos, arquivo.getFileName().toString(), linha, detalhe, avisos);
+        }
+    }
+
+    private record Posicao(Path arquivo, int linha) {
+        @Override
+        public String toString() {
+            return arquivo.getFileName() + " linha " + linha;
+        }
+    }
+
+    /** O evento da linha, ou nulo se ela não for um evento (corrompida ou incompleta). */
+    private EventoDeAuditoria evento(String linha) {
+        try {
+            return json.readValue(linha, EventoDeAuditoria.class);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** O arquivo existe e não termina em quebra de linha: a última gravação foi interrompida. */
+    private static boolean terminaNoMeioDeUmaLinha(Path arquivo) throws IOException {
+        if (!Files.exists(arquivo)) {
+            return false;
+        }
+        try (SeekableByteChannel canal = Files.newByteChannel(arquivo)) {
+            if (canal.size() == 0) {
+                return false;
+            }
+            ByteBuffer ultimo = ByteBuffer.allocate(1);
+            canal.position(canal.size() - 1).read(ultimo);
+            return ultimo.get(0) != '\n';
         }
     }
 
@@ -175,7 +259,8 @@ public class TrilhaDeAuditoria {
         for (int i = arquivos.size() - 1; i >= 0; i--) {
             List<String> linhas = Files.readAllLines(arquivos.get(i), StandardCharsets.UTF_8);
             for (int j = linhas.size() - 1; j >= 0; j--) {
-                if (!linhas.get(j).isBlank()) {
+                // Pula a linha incompleta de uma gravação interrompida.
+                if (!linhas.get(j).isBlank() && evento(linhas.get(j)) != null) {
                     return sha256(linhas.get(j));
                 }
             }

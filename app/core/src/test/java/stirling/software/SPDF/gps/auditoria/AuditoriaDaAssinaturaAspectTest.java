@@ -164,6 +164,32 @@ class AuditoriaDaAssinaturaAspectTest {
     }
 
     @Test
+    void identidadeDeForaDoProxyENegadaComOEnderecoNaTrilha() throws Exception {
+        MDC.put(IdentidadeDoProxy.MDC_ORIGEM_RECUSADA, "fd12:0:0:0:0:0:0:6");
+
+        assertThatThrownBy(() -> controlador(true).signPDFWithCert(pedido(SENHA), null))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("403");
+
+        EventoDeAuditoria evento = unicoEvento();
+        assertThat(evento.resultado()).isEqualTo(EventoDeAuditoria.NEGADO);
+        assertThat(evento.motivo())
+                .isEqualTo(
+                        AuditoriaDaAssinaturaAspect.IDENTIDADE_FORA_DO_PROXY
+                                + " (fd12:0:0:0:0:0:0:6)");
+    }
+
+    @Test
+    void assinaturaQueJaEstavaNoPdfNaoContaComoNova() throws Exception {
+        ResponseEntity<Resource> resposta = controlador(false).signPDFWithCert(pedido(SENHA), null);
+        Path assinado = ((FileSystemResource) resposta.getBody()).getFile().toPath();
+
+        assertThat(AssinaturaDoPdf.daUltimaAssinatura(assinado, pdf.length)).isPresent();
+        // O mesmo PDF devolvido sem mudança: a assinatura é a de antes, não uma nova.
+        assertThat(AssinaturaDoPdf.daUltimaAssinatura(assinado, Files.size(assinado))).isEmpty();
+    }
+
+    @Test
     void semExigirIdentidadeAssinaERegistraSemUsuario() throws Exception {
         controlador(false).signPDFWithCert(pedido(SENHA), null);
 
