@@ -86,12 +86,17 @@ class AuditoriaDaAssinaturaAspectTest {
     @TempDir Path dir;
 
     private TrilhaDeAuditoria trilha;
+
+    /** Sem arquivo e padrão permitir: os testes da trilha não dependem da lista (#19). */
+    private ListaDeCertificados lista;
+
     private CustomPDFDocumentFactory fabrica;
     private byte[] pdf;
     private byte[] pfx;
 
     @BeforeEach
     void preparar() throws Exception {
+        lista = new ListaDeCertificados(dir.resolve("sem-lista.yml"), ListaDeCertificados.PERMITIR);
         trilha = new TrilhaDeAuditoria(dir.resolve("audit"), Clock.systemUTC());
         fabrica = mock(CustomPDFDocumentFactory.class);
         lenient()
@@ -254,6 +259,92 @@ class AuditoriaDaAssinaturaAspectTest {
         }
     }
 
+    // --- #19: quem pode usar cada certificado ---
+
+    private static final String LISTA_DO_CNPJ =
+            String.join(
+                    "\n",
+                    "padrao: negar",
+                    "certificados:",
+                    "  - descricao: GPS teste",
+                    "    cpf_cnpj: \"11.222.333/0001-81\"",
+                    "    permitidos: [fulano@gestao.com.br, \"papel:admin\"]",
+                    "");
+
+    private void usarLista(String yaml) throws Exception {
+        Path arquivo = dir.resolve("certificados.yml");
+        Files.writeString(arquivo, yaml);
+        lista = new ListaDeCertificados(arquivo, ListaDeCertificados.NEGAR);
+    }
+
+    @Test
+    void comPermissaoPorEmailAssina() throws Exception {
+        usarLista(LISTA_DO_CNPJ);
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "Fulano@Gestao.com.br");
+
+        controlador(true).signPDFWithCert(pedido(SENHA), null);
+
+        assertThat(unicoEvento().resultado()).isEqualTo(EventoDeAuditoria.SUCESSO);
+    }
+
+    @Test
+    void comPermissaoPorPapelAssina() throws Exception {
+        usarLista(LISTA_DO_CNPJ);
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "chefe@gestao.com.br");
+        MDC.put(IdentidadeDoProxy.MDC_GRUPOS, "Documentos.Admin");
+
+        controlador(true).signPDFWithCert(pedido(SENHA), null);
+
+        assertThat(unicoEvento().resultado()).isEqualTo(EventoDeAuditoria.SUCESSO);
+    }
+
+    @Test
+    void semPermissaoENegadoComOCertificadoNaTrilhaESemChegarAoControlador() throws Exception {
+        usarLista(LISTA_DO_CNPJ);
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "outro@gestao.com.br");
+        MDC.put(IdentidadeDoProxy.MDC_GRUPOS, "Documentos.Assinante");
+        CustomPDFDocumentFactory nuncaUsada = mock(CustomPDFDocumentFactory.class);
+
+        assertThatThrownBy(() -> controlador(true, nuncaUsada).signPDFWithCert(pedido(SENHA), null))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("403");
+
+        verify(nuncaUsada, never()).load(any(MultipartFile.class));
+        EventoDeAuditoria evento = unicoEvento();
+        assertThat(evento.resultado()).isEqualTo(EventoDeAuditoria.NEGADO);
+        assertThat(evento.motivo()).isEqualTo("sem permissão para o certificado [GPS teste]");
+        assertThat(evento.usuario().email()).isEqualTo("outro@gestao.com.br");
+        assertThat(evento.certificado().cpfCnpj()).isEqualTo(CNPJ);
+        assertThat(evento.certificado().serie()).isEqualTo("1092");
+        assertThat(evento.certificado().arquivoSha256()).isEqualTo(sha256(pfx));
+    }
+
+    @Test
+    void foraDaListaComPadraoNegarENegado() throws Exception {
+        usarLista(LISTA_DO_CNPJ.replace("11.222.333/0001-81", "99.999.999/0001-99"));
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "fulano@gestao.com.br");
+
+        assertThatThrownBy(() -> controlador(true).signPDFWithCert(pedido(SENHA), null))
+                .isInstanceOf(ResponseStatusException.class);
+
+        EventoDeAuditoria evento = unicoEvento();
+        assertThat(evento.resultado()).isEqualTo(EventoDeAuditoria.NEGADO);
+        assertThat(evento.motivo()).isEqualTo("certificado fora da lista (padrão negar)");
+    }
+
+    @Test
+    void senhaErradaContinuaErroENaoNegadoMesmoComPadraoNegar() throws Exception {
+        usarLista("padrao: negar\n");
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "fulano@gestao.com.br");
+
+        assertThatThrownBy(() -> controlador(true).signPDFWithCert(pedido("errada"), null))
+                .isNotInstanceOf(ResponseStatusException.class);
+
+        EventoDeAuditoria evento = unicoEvento();
+        assertThat(evento.resultado()).isEqualTo(EventoDeAuditoria.ERRO);
+        assertThat(evento.motivo()).contains("UnrecoverableKeyException");
+    }
+
     private CertSignController controlador(boolean exigirIdentidade) {
         return controlador(exigirIdentidade, fabrica);
     }
@@ -299,7 +390,15 @@ class AuditoriaDaAssinaturaAspectTest {
         fabricaDeProxy.addAdvisors(
                 advisors.getAdvisors(
                         new SingletonMetadataAwareAspectInstanceFactory(
-                                new AuditoriaDaAssinaturaAspect(trilha, exigirIdentidade),
+                                new AuditoriaDaAssinaturaAspect(
+                                        trilha,
+                                        new PapeisDoUsuario(
+                                                "Documentos.Admin",
+                                                "Documentos.Auditor",
+                                                "Documentos.Assinante",
+                                                ""),
+                                        lista,
+                                        exigirIdentidade),
                                 "auditoria")));
         return (CertSignController) fabricaDeProxy.getProxy();
     }
