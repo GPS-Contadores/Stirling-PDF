@@ -25,7 +25,16 @@ function titleForStatus(status?: number): string {
   return "Request failed";
 }
 
-export function extractAxiosErrorMessage(error: any): {
+/**
+ * `data` overrides `error.response.data`. Tool requests use
+ * `responseType: "blob"`, so the body arrives as a Blob that can only be read
+ * asynchronously: pass the result of `normalizeAxiosErrorData` here, or a
+ * ProblemDetail becomes "{}" and the user only sees the generic fallback.
+ */
+export function extractAxiosErrorMessage(
+  error: any,
+  data: any = error?.response?.data,
+): {
   title: string;
   body: string;
 } {
@@ -33,7 +42,7 @@ export function extractAxiosErrorMessage(error: any): {
     const status = error.response?.status;
     const _statusText = error.response?.statusText || "";
     let parsed: any = undefined;
-    const raw = error.response?.data;
+    const raw = data;
     if (typeof raw === "string") {
       try {
         parsed = JSON.parse(raw);
@@ -61,6 +70,8 @@ export function extractAxiosErrorMessage(error: any): {
       const ids = extractIds();
       if (ids && ids.length > 0) return `Failed files: ${ids.join(", ")}`;
       if (data?.message) return data.message as string;
+      // Spring ProblemDetail (GlobalExceptionHandler) carries it in `detail`.
+      if (typeof data?.detail === "string") return data.detail;
       if (typeof raw === "string") return raw;
       try {
         return JSON.stringify(data);
