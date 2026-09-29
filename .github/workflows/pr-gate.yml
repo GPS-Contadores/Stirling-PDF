@@ -42,17 +42,15 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          # O `owner/repo#N` opcional aceita issue de OUTRO repositório. Sem ele, uma
-          # mudança mecânica que atravessa N repositórios exigia N issues — uma por
-          # repo, criada só para satisfazer esta checagem e fechada minutos depois.
-          # Medido em 22/09/2026: de 16 issues abertas num dia, 12 viveram menos de
-          # 20 minutos e 8 menos de 5. Com o `owner/repo#N`, uma issue guarda-chuva
-          # cobre os N PRs, e o vínculo continua obrigatório.
-          if printf '%s' "$PR_BODY" | grep -qiE -- '(clos(e|es|ed)|fix(e[sd])?|resolv(e|es|ed))[[:space:]]+([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#[0-9]+'; then
+          # Informativo, nunca reprova. Issue obrigatória em todo PR gerava issue
+          # criada só para passar aqui e fechada minutos depois: em 22/09/2026, de
+          # 16 issues abertas num dia, 12 viveram menos de 20 minutos (#128).
+          # Issue existe quando há trabalho a acompanhar; o PR que a atende cita
+          # 'Closes #N' (fecha no merge) ou 'Refs #N' (só liga).
+          if printf '%s' "$PR_BODY" | grep -qiE -- '(clos(e|es|ed)|fix(e[sd])?|resolv(e|es|ed)|refs?|parte de)[[:space:]]+([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#[0-9]+'; then
             echo "::notice::PR vinculado a uma issue."
           else
-            echo "::error title=Sem vínculo com issue::O corpo do PR precisa conter 'Closes #N' — ou 'Closes owner/repo#N', para issue de outro repositório — para a issue fechar no merge e o card andar no Project."
-            exit 1
+            echo "::notice::PR sem issue vinculada. Tudo bem para mudança que nasce e termina neste PR."
           fi
 
       - name: Nome da branch
@@ -161,7 +159,7 @@ jobs:
           {
             echo "### PR Gate — GPS Contadores"
             echo ""
-            echo "Regras verificadas: vínculo com issue, convenção de branch, segredos no diff."
+            echo "Regras verificadas: convenção de branch e segredos no diff. O vínculo com issue é informativo."
             echo ""
             echo "> No plano **Free** este check é advisory: ele sinaliza, mas o GitHub não impede o merge."
             echo "> O bloqueio efetivo entra com os rulesets de \`docs/UPGRADE-TEAM.md\` no plano Team."
