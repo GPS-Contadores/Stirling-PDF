@@ -520,7 +520,13 @@ actual imports, not what worked three years ago.
 
 ### Antes de começar
 
-- **Toda mudança nasce de uma issue.** Sem issue, não há branch.
+- **Issue só quando há trabalho a acompanhar:** pedido de alguém, bug relatado,
+  entrega de vários PRs, decisão que outra área precisa avaliar. Mudança que
+  nasce e termina num PR não precisa de issue: o PR já descreve o que foi feito.
+  Antes de abrir uma issue, procure uma aberta sobre o mesmo assunto.
+- **Decisão técnica fica no repositório, não em issue.** Feature ou mudança com
+  escolha de desenho: use a skill `tlc-spec-driven`. Ela grava spec, tarefas e
+  o log de decisões em `.specs/` (versionado, revisado no PR).
 - **Sincronize antes de ramificar:**
 
   ```bash
@@ -541,12 +547,14 @@ actual imports, not what worked three years ago.
   **descrição**, não número de issue — `fix/retry-de-conexao`, não
   `fix/issue-61`. Nunca commite direto na `main`.
 - Se a branch em que você está não seguir esse padrão — inclusive uma criada por
-  ferramenta antes de você começar —, renomeie antes de abrir o PR:
-  `git branch -m <tipo>/<desc>`. Sem isso o PR Gate reprova.
-- **`Closes #N` no corpo do PR.** É o que fecha a issue e move o card. Sem isso
-  o PR Gate reprova.
-- **Um assunto por PR.** Dois assuntos são dois PRs. PR grande não é entrega
-  maior — é revisão que não acontece e reversão que não existe.
+  ferramenta antes de você começar (`claude/...`, `cursor/...`) —, renomeie
+  antes de abrir o PR: `git branch -m <tipo>/<desc>`. Sem isso o PR Gate reprova.
+- **PR que atende uma issue cita a issue no corpo:** `Closes #N` fecha no merge;
+  `Refs #N` só liga, para a issue que continua aberta. Sem issue, não cite nada.
+- **Um assunto por PR, e assunto é o tema, não o arquivo.** Ajustes do mesmo
+  tema vão juntos num PR só; não abra um PR por arquivo nem por correção miúda.
+  Temas diferentes são PRs diferentes: PR que mistura assuntos é revisão que não
+  acontece e reversão que não existe.
 
 ### Antes de pedir merge
 
