@@ -27,7 +27,6 @@ import lombok.extern.slf4j.Slf4j;
 import stirling.software.common.annotations.AutoJobPostMapping;
 import stirling.software.common.annotations.api.ConvertApi;
 import stirling.software.common.enumeration.ResourceWeight;
-import stirling.software.common.model.api.PDFFile;
 import stirling.software.common.util.WebResponseUtils;
 
 import tools.jackson.core.JacksonException;
@@ -63,6 +62,18 @@ public class ConvertPDFToOfx {
                     "X-GPS-Conferencia", Pattern.compile("ok|divergente"),
                     "X-GPS-Avisos", Pattern.compile("[A-Za-z0-9+/=]+"));
 
+    // The shape the ofx service accepts (CONTA_VALIDA in ofx-service/app/nucleo.py), capped in
+    // length. Checked here too because the value goes into the multipart body as typed: a line
+    // break would let it forge another form field, such as exigir_conferencia=false.
+    private static final Pattern CONTA = Pattern.compile("[\\d.\\- xX]{1,32}");
+
+    static final String NEEDS_ACCOUNT =
+            "OFX não gerado: este extrato não imprime o número da conta. Preencha o campo"
+                    + " \"Número da conta\" com a conta cadastrada no Questor e converta de novo.";
+    static final String POINT_TO_OFX_PAGE =
+            " O Converter só entrega OFX conferido; a página /ofx/ entrega este extrato com o"
+                    + " aviso, para conferir à mão antes de importar.";
+
     // HTTP/1.1 on purpose: the JDK client defaults to HTTP/2 and, over plain http, sends an
     // "Upgrade: h2c" request. The ofx service runs on uvicorn, which rejects the upgrade
     // ("Unsupported upgrade request") and loses the multipart body, answering 422
@@ -89,10 +100,17 @@ public class ConvertPDFToOfx {
                             + " for Questor. The OFX is only produced if the transactions add up"
                             + " to the balance printed on the document. Input:PDF Output:OFX"
                             + " Type:SISO")
-    public ResponseEntity<byte[]> processPdfToOfx(@ModelAttribute PDFFile file) throws Exception {
-        MultipartFile inputFile = file.getFileInput();
+    public ResponseEntity<byte[]> processPdfToOfx(@ModelAttribute ConvertPdfToOfxRequest ofxRequest)
+            throws Exception {
+        MultipartFile inputFile = ofxRequest.getFileInput();
         if (inputFile == null || inputFile.isEmpty()) {
             throw new IllegalArgumentException("Nenhum PDF enviado.");
+        }
+        String conta = ofxRequest.getConta() == null ? "" : ofxRequest.getConta().trim();
+        if (!conta.isEmpty() && !CONTA.matcher(conta).matches()) {
+            throw new IllegalArgumentException(
+                    "OFX não gerado: o número da conta tem só números, ponto, hífen e o dígito X,"
+                            + " como está cadastrado no Questor.");
         }
 
         String originalName = Filenames.toSimpleFileName(inputFile.getOriginalFilename());
@@ -108,7 +126,7 @@ public class ConvertPDFToOfx {
         // exigir_conferencia=true: a balance mismatch is refused, not downgraded to a warning.
         // Warnings are relayed to the UI (see X-GPS-Avisos below), but a toast is easy to miss,
         // and an OFX that does not add up must never reach Questor looking like a normal file.
-        byte[] body = multipart(boundary, originalName, inputFile.getBytes());
+        byte[] body = multipart(boundary, originalName, inputFile.getBytes(), conta);
 
         URI endpoint = URI.create(stripTrailingSlash(serviceUrl) + "/ofx/api/converter");
         HttpRequest.Builder request =
@@ -149,7 +167,7 @@ public class ConvertPDFToOfx {
             // balance mismatch, too large). IllegalArgumentException because JobExecutorService
             // only lets that through; anything else becomes a generic 500. The global handler
             // turns it into a 400 ProblemDetail whose "detail" the frontend shows.
-            throw new IllegalArgumentException("OFX não gerado: " + reason(response.body()));
+            throw new IllegalArgumentException(refusal(response.body()));
         }
         log.warn("ofx service returned HTTP {}", status);
         throw serviceFailure("O conversor OFX falhou (HTTP " + status + ").");
@@ -162,6 +180,29 @@ public class ConvertPDFToOfx {
      */
     private static RuntimeException serviceFailure(String message) {
         return new IllegalStateException(message);
+    }
+
+    /**
+     * What the user reads when the service refuses the document. Two refusals have a way out that
+     * the service's sentence does not spell out for this screen, and both are flagged in {@code
+     * dados}: the statement does not print the account (type it in the field), and the balance
+     * check did not pass (only the /ofx/ page hands out an OFX that does not add up).
+     */
+    static String refusal(byte[] body) {
+        JsonNode dados = null;
+        try {
+            dados = JSON.readTree(new String(body, StandardCharsets.UTF_8)).get("dados");
+        } catch (JacksonException e) {
+            // Not JSON: reason() falls back to the raw text.
+        }
+        if (dados != null && dados.path("precisa_conta").asBoolean(false)) {
+            return NEEDS_ACCOUNT;
+        }
+        String message = "OFX não gerado: " + reason(body);
+        if (dados != null && dados.path("conferencia_nao_fechou").asBoolean(false)) {
+            return message + POINT_TO_OFX_PAGE;
+        }
+        return message;
     }
 
     /**
@@ -200,8 +241,11 @@ public class ConvertPDFToOfx {
         return text.isEmpty() ? "documento recusado pelo conversor." : text;
     }
 
-    /** Multipart body for the ofx service: the PDF as "arquivo" plus exigir_conferencia=true. */
-    private static byte[] multipart(String boundary, String fileName, byte[] pdf)
+    /**
+     * Multipart body for the ofx service: the PDF as "arquivo", exigir_conferencia=true and, when
+     * informed, "conta".
+     */
+    private static byte[] multipart(String boundary, String fileName, byte[] pdf, String conta)
             throws IOException {
         String safeName = fileName.replace("\"", "").replace("\r", "").replace("\n", "");
         String head =
@@ -218,6 +262,14 @@ public class ConvertPDFToOfx {
                         + "\r\n"
                         + "Content-Disposition: form-data; name=\"exigir_conferencia\"\r\n\r\n"
                         + "true\r\n"
+                        + (conta.isEmpty()
+                                ? ""
+                                : "--"
+                                        + boundary
+                                        + "\r\n"
+                                        + "Content-Disposition: form-data; name=\"conta\"\r\n\r\n"
+                                        + conta
+                                        + "\r\n")
                         + "--"
                         + boundary
                         + "--\r\n";

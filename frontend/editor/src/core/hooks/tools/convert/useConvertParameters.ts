@@ -76,6 +76,10 @@ export interface ConvertParameters extends BaseParameters {
     /** RUBI calculation code; only used where the sheet left it blank */
     calculo: string;
   };
+  ofxOptions?: {
+    /** Account number for statements that do not print it; replaces the printed one */
+    conta: string;
+  };
   isSmartDetection: boolean;
   smartDetectionType: "mixed" | "images" | "web" | "none";
 }
@@ -140,6 +144,9 @@ export const defaultParameters: ConvertParameters = {
   },
   rubiOptions: {
     calculo: "",
+  },
+  ofxOptions: {
+    conta: "",
   },
   isSmartDetection: false,
   smartDetectionType: "none",
