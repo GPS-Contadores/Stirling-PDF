@@ -1,5 +1,9 @@
-import { describe, expect, test, vi, beforeEach } from "vitest";
+import { describe, expect, test, vi, beforeEach, afterAll } from "vitest";
+import fs from "fs";
+import path from "path";
+import { parse } from "smol-toml";
 import { alert } from "@app/components/toast";
+import i18n from "@app/i18n";
 import { handleHttpError } from "@app/services/httpErrorHandler";
 import { extractAxiosErrorMessage } from "@app/services/httpErrorUtils";
 
@@ -77,6 +81,79 @@ describe("extractAxiosErrorMessage", () => {
     );
     expect(extractAxiosErrorMessage(error, PROBLEM_DETAIL).body).toBe(
       PROBLEM_DETAIL.detail,
+    );
+  });
+});
+
+describe("handleHttpError — in the user's language (pt-BR)", () => {
+  // The real pt-BR file, not strings made up for the test: a key missing or
+  // misspelled there has to fail here.
+  const ptBR = parse(
+    fs.readFileSync(
+      path.join(__dirname, "../../../public/locales/pt-BR/translation.toml"),
+      "utf8",
+    ),
+  );
+  const idiomaAntes = i18n.language;
+
+  beforeEach(async () => {
+    vi.mocked(alert).mockClear();
+    i18n.addResourceBundle("pt-BR", "translation", ptBR, true, true);
+    await i18n.changeLanguage("pt-BR");
+  });
+  afterAll(async () => {
+    await i18n.changeLanguage(idiomaAntes);
+  });
+
+  test("title and server message come in Portuguese, by errorCode", async () => {
+    await handleHttpError(blobError(400, PROBLEM_DETAIL, "/pt/rotate-pdf"));
+
+    const shown = vi.mocked(alert).mock.calls[0][0];
+    expect(shown.title).toBe("Erro na solicitação");
+    expect(shown.body).toBe(
+      "O PDF parece estar corrompido ou danificado. Use a ferramenta Reparar para corrigir o arquivo e tente de novo.",
+    );
+  });
+
+  test("a code whose message carries case data keeps the server's text", async () => {
+    const detail = "File not found with ID: 1234";
+    await handleHttpError(
+      blobError(400, { status: 400, detail, errorCode: "E030" }, "/pt/e030"),
+    );
+
+    const shown = vi.mocked(alert).mock.calls[0][0];
+    expect(shown.title).toBe("Erro na solicitação");
+    expect(shown.body).toBe(detail);
+  });
+
+  test("the generic fallback and the network title are translated", async () => {
+    await handleHttpError({
+      isAxiosError: true,
+      config: { url: "/pt/empty" },
+      response: { status: 500, data: blob("") },
+    });
+    expect(vi.mocked(alert).mock.calls[0][0]).toMatchObject({
+      title: "Erro no servidor",
+      body: "Não foi possível processar a solicitação.",
+    });
+  });
+
+  test("the wrong-password toast is translated too", async () => {
+    await handleHttpError(
+      blobError(
+        400,
+        {
+          status: 400,
+          errorCode: "E004",
+          detail:
+            "The PDF Document is passworded and either the password was not provided or was incorrect",
+        },
+        "/pt/senha",
+      ),
+    );
+    expect(vi.mocked(alert)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(alert).mock.calls[0][0].body).toBe(
+      "A senha do PDF está incorreta ou não foi informada.",
     );
   });
 });
