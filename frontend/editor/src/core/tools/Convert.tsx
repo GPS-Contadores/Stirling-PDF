@@ -10,6 +10,7 @@ import ConvertSettings from "@app/components/tools/convert/ConvertSettings";
 
 import { useConvertParameters } from "@app/hooks/tools/convert/useConvertParameters";
 import { useConvertOperation } from "@app/hooks/tools/convert/useConvertOperation";
+import { useOfxAccountGuard } from "@app/hooks/tools/convert/useOfxAccountGuard";
 import { BaseToolProps, ToolComponent } from "@app/types/tool";
 
 const Convert = ({ onPreviewFile, onComplete, onError }: BaseToolProps) => {
@@ -108,6 +109,19 @@ const Convert = ({ onPreviewFile, onComplete, onError }: BaseToolProps) => {
     }
   }, [hasResults]);
 
+  // GPS-Contadores: the account typed for PDF → OFX (see useOfxAccountGuard).
+  const ofxAccountError = useOfxAccountGuard({
+    parameters: convertParams.parameters,
+    updateParameter: convertParams.updateParameter,
+    errorMessage: convertOperation.errorMessage,
+    convertedCount: convertOperation.files.length,
+    selectionKey: selectedFiles
+      .map((f) => f.fileId)
+      .sort()
+      .join(","),
+    reopenSettings: () => handleSettingsReset(),
+  });
+
   const handleConvert = async () => {
     try {
       await convertOperation.executeOperation(
@@ -159,6 +173,7 @@ const Convert = ({ onPreviewFile, onComplete, onError }: BaseToolProps) => {
             getAvailableToExtensions={convertParams.getAvailableToExtensions}
             selectedFiles={selectedFiles}
             disabled={endpointLoading}
+            ofxAccountError={ofxAccountError}
           />
         ),
       },

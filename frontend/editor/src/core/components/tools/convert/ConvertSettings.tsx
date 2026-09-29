@@ -36,6 +36,7 @@ import ConvertFromEbookSettings from "@app/components/tools/convert/ConvertFromE
 import ConvertFromSvgSettings from "@app/components/tools/convert/ConvertFromSvgSettings";
 import ConvertToEpubSettings from "@app/components/tools/convert/ConvertToEpubSettings";
 import ConvertToRubiSettings from "@app/components/tools/convert/ConvertToRubiSettings";
+import ConvertToOfxSettings from "@app/components/tools/convert/ConvertToOfxSettings";
 import { ConvertParameters } from "@app/hooks/tools/convert/useConvertParameters";
 import {
   FROM_FORMAT_OPTIONS,
@@ -57,6 +58,8 @@ interface ConvertSettingsProps {
   ) => Array<{ value: string; label: string; group: string }>;
   selectedFiles?: StirlingFile[];
   disabled?: boolean;
+  /** PDF → OFX refused for the account number: shown on the account field */
+  ofxAccountError?: string | null;
 }
 
 const ConvertSettings = ({
@@ -65,6 +68,7 @@ const ConvertSettings = ({
   getAvailableToExtensions = defaultGetAvailableToExtensions,
   selectedFiles = [],
   disabled = false,
+  ofxAccountError = null,
 }: ConvertSettingsProps) => {
   const { t } = useTranslation();
   const theme = useMantineTheme();
@@ -547,6 +551,20 @@ const ConvertSettings = ({
               parameters={parameters}
               onParameterChange={onParameterChange}
               disabled={disabled}
+            />
+          </>
+        )}
+
+      {/* PDF bank statement to OFX options */}
+      {parameters.fromExtension === "pdf" &&
+        parameters.toExtension === "ofx" && (
+          <>
+            <Divider />
+            <ConvertToOfxSettings
+              parameters={parameters}
+              onParameterChange={onParameterChange}
+              disabled={disabled}
+              error={ofxAccountError}
             />
           </>
         )}
