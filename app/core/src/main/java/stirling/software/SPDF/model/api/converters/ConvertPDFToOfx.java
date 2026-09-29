@@ -67,12 +67,15 @@ public class ConvertPDFToOfx {
     // break would let it forge another form field, such as exigir_conferencia=false.
     private static final Pattern CONTA = Pattern.compile("[\\d.\\- xX]{1,32}");
 
+    // Both name the field as `campo "Número da conta"`: the Convert tool looks for that to
+    // highlight the field instead of showing the error (ofxAccountRefusal in
+    // useConvertOperation.ts).
     static final String NEEDS_ACCOUNT =
             "OFX não gerado: este extrato não imprime o número da conta. Preencha o campo"
                     + " \"Número da conta\" com a conta cadastrada no Questor e converta de novo.";
-    static final String POINT_TO_OFX_PAGE =
-            " O Converter só entrega OFX conferido; a página /ofx/ entrega este extrato com o"
-                    + " aviso, para conferir à mão antes de importar.";
+    static final String INVALID_ACCOUNT =
+            "OFX não gerado: corrija o campo \"Número da conta\". Use só números, ponto, hífen e"
+                    + " o dígito X, como a conta está cadastrada no Questor.";
 
     // HTTP/1.1 on purpose: the JDK client defaults to HTTP/2 and, over plain http, sends an
     // "Upgrade: h2c" request. The ofx service runs on uvicorn, which rejects the upgrade
@@ -108,9 +111,7 @@ public class ConvertPDFToOfx {
         }
         String conta = ofxRequest.getConta() == null ? "" : ofxRequest.getConta().trim();
         if (!conta.isEmpty() && !CONTA.matcher(conta).matches()) {
-            throw new IllegalArgumentException(
-                    "OFX não gerado: o número da conta tem só números, ponto, hífen e o dígito X,"
-                            + " como está cadastrado no Questor.");
+            throw new IllegalArgumentException(INVALID_ACCOUNT);
         }
 
         String originalName = Filenames.toSimpleFileName(inputFile.getOriginalFilename());
@@ -183,10 +184,9 @@ public class ConvertPDFToOfx {
     }
 
     /**
-     * What the user reads when the service refuses the document. Two refusals have a way out that
-     * the service's sentence does not spell out for this screen, and both are flagged in {@code
-     * dados}: the statement does not print the account (type it in the field), and the balance
-     * check did not pass (only the /ofx/ page hands out an OFX that does not add up).
+     * What the user reads when the service refuses the document. The two account refusals, flagged
+     * in {@code dados}, point at the account field of this screen (the service's sentence was
+     * written for the /ofx/ page); any other keeps the service's sentence.
      */
     static String refusal(byte[] body) {
         JsonNode dados = null;
@@ -198,11 +198,10 @@ public class ConvertPDFToOfx {
         if (dados != null && dados.path("precisa_conta").asBoolean(false)) {
             return NEEDS_ACCOUNT;
         }
-        String message = "OFX não gerado: " + reason(body);
-        if (dados != null && dados.path("conferencia_nao_fechou").asBoolean(false)) {
-            return message + POINT_TO_OFX_PAGE;
+        if (dados != null && dados.path("conta_invalida").asBoolean(false)) {
+            return INVALID_ACCOUNT;
         }
-        return message;
+        return "OFX não gerado: " + reason(body);
     }
 
     /**

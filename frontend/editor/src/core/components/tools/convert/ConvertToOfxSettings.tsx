@@ -9,19 +9,23 @@ interface ConvertToOfxSettingsProps {
     value: ConvertParameters[K],
   ) => void;
   disabled?: boolean;
+  /** Why the last conversion was refused for the account, shown on the field */
+  error?: string | null;
 }
 
 /**
  * GPS-Contadores: some statements do not print the account number (the
  * Banco do Brasil one downloaded from the website), and without it Questor
- * cannot tell which account the OFX belongs to. The ofx service then refuses
- * and the error points here. Typed, it replaces the number printed on the
- * statement, so it is meant for one statement at a time.
+ * cannot tell which account the OFX belongs to. The ofx service then refuses,
+ * and the Convert tool reopens these settings with the refusal on the field.
+ * Typed, it replaces the number printed on the statement, so it is meant for
+ * one statement at a time.
  */
 const ConvertToOfxSettings = ({
   parameters,
   onParameterChange,
   disabled = false,
+  error = null,
 }: ConvertToOfxSettingsProps) => {
   const { t } = useTranslation();
   const conta = parameters.ofxOptions?.conta ?? "";
@@ -42,6 +46,8 @@ const ConvertToOfxSettings = ({
         placeholder="27346-5"
         maxLength={32}
         value={conta}
+        error={error || undefined}
+        withAsterisk={!!error}
         onChange={(event) =>
           onParameterChange("ofxOptions", {
             // The shape the ofx service accepts: digits, dot, hyphen, space

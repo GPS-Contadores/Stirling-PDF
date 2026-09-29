@@ -83,6 +83,16 @@ export const shouldProcessFilesSeparately = (
   );
 };
 
+/**
+ * Whether a PDF → OFX failure is about the account number: the statement does
+ * not print it, or the one typed is not an account. ConvertPDFToOfx.java names
+ * the field as `campo "Número da conta"` in both (NEEDS_ACCOUNT,
+ * INVALID_ACCOUNT), and the Convert tool then highlights the field with the
+ * message instead of showing the error.
+ */
+export const ofxAccountRefusal = (message?: string | null): boolean =>
+  !!message && /campo "N[úu]mero da conta"/i.test(message);
+
 // Static function that can be used by both the hook and automation executor
 export const buildConvertFormData = (
   parameters: ConvertParameters,

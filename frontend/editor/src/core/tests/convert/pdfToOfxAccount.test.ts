@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   buildConvertFormData,
   convertProcessor,
+  ofxAccountRefusal,
 } from "@app/hooks/tools/convert/useConvertOperation";
 import apiClient from "@app/services/apiClient";
 
@@ -35,6 +36,27 @@ describe("buildConvertFormData for PDF → OFX", () => {
   test("leaves conta out when blank, so the printed account is used", () => {
     const form = buildConvertFormData(params("  "), [statement()]);
     expect(form.has("conta")).toBe(false);
+  });
+});
+
+describe("ofxAccountRefusal", () => {
+  // NEEDS_ACCOUNT and INVALID_ACCOUNT in ConvertPDFToOfx.java.
+  test.each([
+    'OFX não gerado: este extrato não imprime o número da conta. Preencha o campo "Número da conta" com a conta cadastrada no Questor e converta de novo.',
+    'OFX não gerado: corrija o campo "Número da conta". Use só números, ponto, hífen e o dígito X, como a conta está cadastrada no Questor.',
+    // Several statements: the reasons come joined, one per file.
+    'a.pdf: OFX não gerado: este extrato não imprime o número da conta. Preencha o campo "Número da conta" com a conta cadastrada no Questor e converta de novo.',
+  ])("highlights the field for %s", (message) => {
+    expect(ofxAccountRefusal(message)).toBe(true);
+  });
+
+  test.each([
+    null,
+    "",
+    "OFX não gerado: Layout desconhecido.",
+    "OFX não gerado: Não achei o número da conta no cabeçalho.",
+  ])("leaves other refusals as they are: %s", (message) => {
+    expect(ofxAccountRefusal(message)).toBe(false);
   });
 });
 

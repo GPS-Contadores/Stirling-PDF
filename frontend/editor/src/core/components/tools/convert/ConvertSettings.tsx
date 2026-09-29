@@ -58,6 +58,8 @@ interface ConvertSettingsProps {
   ) => Array<{ value: string; label: string; group: string }>;
   selectedFiles?: StirlingFile[];
   disabled?: boolean;
+  /** PDF → OFX refused for the account number: shown on the account field */
+  ofxAccountError?: string | null;
 }
 
 const ConvertSettings = ({
@@ -66,6 +68,7 @@ const ConvertSettings = ({
   getAvailableToExtensions = defaultGetAvailableToExtensions,
   selectedFiles = [],
   disabled = false,
+  ofxAccountError = null,
 }: ConvertSettingsProps) => {
   const { t } = useTranslation();
   const theme = useMantineTheme();
@@ -561,6 +564,7 @@ const ConvertSettings = ({
               parameters={parameters}
               onParameterChange={onParameterChange}
               disabled={disabled}
+              error={ofxAccountError}
             />
           </>
         )}

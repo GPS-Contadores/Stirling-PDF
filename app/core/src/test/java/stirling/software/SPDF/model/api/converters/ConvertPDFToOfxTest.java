@@ -110,11 +110,13 @@ class ConvertPDFToOfxTest {
         // It would open a new multipart field and could switch the balance check off.
         serviceAnswers(200, "");
 
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        controller.processPdfToOfx(
-                                request("1\r\n--x\r\nContent-Disposition: form-data;")));
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                controller.processPdfToOfx(
+                                        request("1\r\n--x\r\nContent-Disposition: form-data;")));
+        assertEquals(ConvertPDFToOfx.INVALID_ACCOUNT, error.getMessage());
         assertNull(receivedPath.get());
     }
 
@@ -135,21 +137,27 @@ class ConvertPDFToOfxTest {
     }
 
     @Test
-    void balanceCheckThatDidNotPassPointsAtTheOfxPage() {
+    void accountRefusedByTheServicePointsAtTheField() {
         serviceAnswers(
                 422,
-                "{\"ok\":false,\"erro\":\"Conversão recusada porque a conferência não fechou:"
-                        + " rendimento.\",\"dados\":{\"conferencia_nao_fechou\":true}}");
+                "{\"ok\":false,\"erro\":\"A conta '12/3' não parece um número de conta.\","
+                        + "\"dados\":{\"conta_invalida\":true}}");
 
         IllegalArgumentException error =
                 assertThrows(
                         IllegalArgumentException.class,
                         () -> controller.processPdfToOfx(request("27346-5")));
 
-        assertEquals(
-                "OFX não gerado: Conversão recusada porque a conferência não fechou: rendimento."
-                        + ConvertPDFToOfx.POINT_TO_OFX_PAGE,
-                error.getMessage());
+        assertEquals(ConvertPDFToOfx.INVALID_ACCOUNT, error.getMessage());
+    }
+
+    @Test
+    void bothAccountMessagesNameTheFieldTheConvertToolLooksFor() {
+        // useConvertOperation.ts (ofxAccountRefusal) highlights the field on this text.
+        for (String message :
+                new String[] {ConvertPDFToOfx.NEEDS_ACCOUNT, ConvertPDFToOfx.INVALID_ACCOUNT}) {
+            assertTrue(message.contains("campo \"Número da conta\""), message);
+        }
     }
 
     @Test

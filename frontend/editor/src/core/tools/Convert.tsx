@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useEndpointEnabled } from "@app/hooks/useEndpointConfig";
 import { useFileState } from "@app/contexts/FileContext";
@@ -9,7 +9,10 @@ import { createToolFlow } from "@app/components/tools/shared/createToolFlow";
 import ConvertSettings from "@app/components/tools/convert/ConvertSettings";
 
 import { useConvertParameters } from "@app/hooks/tools/convert/useConvertParameters";
-import { useConvertOperation } from "@app/hooks/tools/convert/useConvertOperation";
+import {
+  ofxAccountRefusal,
+  useConvertOperation,
+} from "@app/hooks/tools/convert/useConvertOperation";
 import { BaseToolProps, ToolComponent } from "@app/types/tool";
 
 const Convert = ({ onPreviewFile, onComplete, onError }: BaseToolProps) => {
@@ -108,6 +111,31 @@ const Convert = ({ onPreviewFile, onComplete, onError }: BaseToolProps) => {
     }
   }, [hasResults]);
 
+  // GPS-Contadores: PDF → OFX refused for the account number. The settings
+  // collapse on error and reopening them clears it, so the message would be
+  // gone by the time the field is visible. Reopen them here and show the
+  // message on the field instead.
+  const [ofxAccountError, setOfxAccountError] = useState<string | null>(null);
+  const isPdfToOfx =
+    convertParams.parameters.fromExtension === "pdf" &&
+    convertParams.parameters.toExtension === "ofx";
+
+  useEffect(() => {
+    const message = convertOperation.errorMessage;
+    if (isPdfToOfx && ofxAccountRefusal(message)) {
+      setOfxAccountError(message);
+      handleSettingsReset();
+    }
+  }, [convertOperation.errorMessage]);
+
+  useEffect(() => {
+    setOfxAccountError(null);
+  }, [
+    convertParams.parameters.ofxOptions?.conta,
+    convertParams.parameters.fromExtension,
+    convertParams.parameters.toExtension,
+  ]);
+
   const handleConvert = async () => {
     try {
       await convertOperation.executeOperation(
@@ -159,6 +187,7 @@ const Convert = ({ onPreviewFile, onComplete, onError }: BaseToolProps) => {
             getAvailableToExtensions={convertParams.getAvailableToExtensions}
             selectedFiles={selectedFiles}
             disabled={endpointLoading}
+            ofxAccountError={ofxAccountError}
           />
         ),
       },
