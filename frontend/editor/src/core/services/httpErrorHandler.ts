@@ -162,23 +162,25 @@ export async function handleHttpError(error: any): Promise<boolean> {
   const { title, body } = extractAxiosErrorMessage(error, normalized);
 
   // 1) If server sends structured file IDs for failures, also mark them errored in UI
+  let hasErroredFiles = false;
   try {
     const ids = extractErrorFileIds(normalized);
     if (ids && ids.length > 0) {
+      hasErroredFiles = true;
       broadcastErroredFiles(ids);
     }
   } catch (e) {
     console.debug("extractErrorFileIds", e);
   }
 
-  // 2) Generic-vs-special dedupe by endpoint
+  // 2) Generic-vs-special dedupe by endpoint. Decided from the response, not
+  // from the English wording of `body`, which is translated now.
   const url: string | undefined = error?.config?.url;
   const now = Date.now();
   const isSpecial =
     status === 422 ||
     status === 409 || // often actionable conflicts
-    /Failed files:/.test(body) ||
-    /invalid\/corrupted file\(s\)/i.test(body);
+    hasErroredFiles;
 
   if (isSpecial && url) {
     recentSpecialByEndpoint[url] = now;
