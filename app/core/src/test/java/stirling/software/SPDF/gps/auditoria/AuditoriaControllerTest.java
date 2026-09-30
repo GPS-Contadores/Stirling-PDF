@@ -46,7 +46,13 @@ class AuditoriaControllerTest {
 
     private String consultar(String leitores) throws Exception {
         ResponseEntity<String> resposta =
-                new AuditoriaController(trilha, leitores)
+                new AuditoriaController(
+                                trilha,
+                                new PapeisDoUsuario(
+                                        "Documentos.Admin",
+                                        "Documentos.Auditor",
+                                        "Documentos.Assinante",
+                                        leitores))
                         .consultar(null, null, null, null, null, 500);
         assertThat(resposta.getHeaders().getContentType().getCharset())
                 .isEqualTo(StandardCharsets.UTF_8);
@@ -87,5 +93,29 @@ class AuditoriaControllerTest {
     void semIdentidadeRecebe403() {
         assertThatThrownBy(() -> consultar("auditor@gestao.com.br"))
                 .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void auditorPeloAppRoleConsultaSemEstarNaLista() throws Exception {
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "quem@gestao.com.br");
+        MDC.put(IdentidadeDoProxy.MDC_GRUPOS, "documentos.auditor");
+
+        assertThat(consultar("")).contains("\"total\":1");
+    }
+
+    @Test
+    void adminPeloAppRoleTambemConsulta() throws Exception {
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "chefe@gestao.com.br");
+        MDC.put(IdentidadeDoProxy.MDC_GRUPOS, "Documentos.Admin");
+
+        assertThat(consultar("")).contains("\"total\":1");
+    }
+
+    @Test
+    void assinanteNaoConsulta() {
+        MDC.put(IdentidadeDoProxy.MDC_EMAIL, "fulano@gestao.com.br");
+        MDC.put(IdentidadeDoProxy.MDC_GRUPOS, "Documentos.Assinante");
+
+        assertThatThrownBy(() -> consultar("")).isInstanceOf(ResponseStatusException.class);
     }
 }

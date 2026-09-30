@@ -29,6 +29,10 @@ import stirling.software.SPDF.model.api.security.SignPDFWithCertRequest;
  * Registra na {@link TrilhaDeAuditoria} toda chamada à assinatura com certificado ({@code POST
  * /api/v1/security/cert-sign}): sucesso, erro ou negada.
  *
+ * <p>Nega antes de assinar quem não tem identidade do proxy e quem a {@link ListaDeCertificados}
+ * não libera para o certificado do pedido ({@link CertificadoDoPedido}, #19). Depois de assinar,
+ * confere se o PDF saiu assinado com o certificado autorizado.
+ *
  * <p>{@code @Order(30)} põe este aspecto por dentro do {@code AutoJobAspect} ({@code @Order(20)}):
  * com {@code ?async=true} ele roda na thread do job, com o MDC (a identidade) já copiado e o
  * resultado real em mãos.
@@ -47,15 +51,23 @@ public class AuditoriaDaAssinaturaAspect {
             "identidade recusada: a conexão não veio do proxy";
     static final String SEM_ASSINATURA_NOVA = "o PDF devolvido não traz assinatura nova";
     static final String SAIDA_ILEGIVEL = "não foi possível conferir o PDF assinado";
+    static final String OUTRO_CERTIFICADO =
+            "o PDF foi assinado com outro certificado, não o autorizado";
     private static final int TAMANHO_MAXIMO_DO_MOTIVO = 300;
 
     private final TrilhaDeAuditoria trilha;
+    private final PapeisDoUsuario papeis;
+    private final ListaDeCertificados certificados;
     private final boolean exigirIdentidade;
 
     public AuditoriaDaAssinaturaAspect(
             TrilhaDeAuditoria trilha,
+            PapeisDoUsuario papeis,
+            ListaDeCertificados certificados,
             @Value("${gps.auditoria.exigir-identidade:true}") boolean exigirIdentidade) {
         this.trilha = trilha;
+        this.papeis = papeis;
+        this.certificados = certificados;
         this.exigirIdentidade = exigirIdentidade;
     }
 
@@ -93,6 +105,27 @@ public class AuditoriaDaAssinaturaAspect {
                     HttpStatus.FORBIDDEN, "A assinatura exige login pelo GPS Documentos.");
         }
 
+        // Quem pode usar este certificado (#19). Com senha errada não há o que decidir: o
+        // controlador falha do mesmo jeito, e o erro real vai para a trilha.
+        CertificadoDoPedido.Identificacao pedidoDe = CertificadoDoPedido.identificar(pedido);
+        EventoDeAuditoria.Certificado autorizado =
+                pedidoDe.certificado() != null
+                        ? comArquivo(pedidoDe.certificado(), arquivoDoCertificado.arquivoSha256())
+                        : null;
+        if (pedidoDe.situacao() != CertificadoDoPedido.Situacao.SENHA_ERRADA) {
+            ListaDeCertificados.Decisao decisao =
+                    certificados.decidir(autorizado, identidade, papeis.de(identidade));
+            if (!decisao.permitido()) {
+                registro.gravar(
+                        autorizado != null ? autorizado : arquivoDoCertificado,
+                        antes,
+                        EventoDeAuditoria.NEGADO,
+                        decisao.motivo());
+                throw new ResponseStatusException(
+                        HttpStatus.FORBIDDEN, "Sem permissão para assinar com este certificado.");
+            }
+        }
+
         Object resultado;
         try {
             resultado = ponto.proceed();
@@ -128,17 +161,18 @@ public class AuditoriaDaAssinaturaAspect {
                     falha);
             throw falha;
         }
+        if (certificado.isPresent()
+                && autorizado != null
+                && !autorizado.sha256().equalsIgnoreCase(certificado.get().sha256())) {
+            // A permissão valeu para um certificado e o PDF saiu assinado com outro: não entrega.
+            EventoDeAuditoria.Certificado usado =
+                    comArquivo(certificado.get(), arquivoDoCertificado.arquivoSha256());
+            registro.gravar(usado, depois, EventoDeAuditoria.ERRO, OUTRO_CERTIFICADO);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, OUTRO_CERTIFICADO);
+        }
         if (certificado.isPresent()) {
-            EventoDeAuditoria.Certificado c = certificado.get();
             registro.gravar(
-                    new EventoDeAuditoria.Certificado(
-                            c.titular(),
-                            c.cpfCnpj(),
-                            c.serie(),
-                            c.emissor(),
-                            c.validoAte(),
-                            c.sha256(),
-                            arquivoDoCertificado.arquivoSha256()),
+                    comArquivo(certificado.get(), arquivoDoCertificado.arquivoSha256()),
                     depois,
                     EventoDeAuditoria.SUCESSO,
                     null);
@@ -147,6 +181,18 @@ public class AuditoriaDaAssinaturaAspect {
                     arquivoDoCertificado, depois, EventoDeAuditoria.ERRO, SEM_ASSINATURA_NOVA);
         }
         return resultado;
+    }
+
+    private static EventoDeAuditoria.Certificado comArquivo(
+            EventoDeAuditoria.Certificado c, String arquivoSha256) {
+        return new EventoDeAuditoria.Certificado(
+                c.titular(),
+                c.cpfCnpj(),
+                c.serie(),
+                c.emissor(),
+                c.validoAte(),
+                c.sha256(),
+                arquivoSha256);
     }
 
     /** O que é comum às linhas de uma mesma chamada. */

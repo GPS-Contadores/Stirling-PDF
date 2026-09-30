@@ -3,13 +3,9 @@ package stirling.software.SPDF.gps.auditoria;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
-import java.util.stream.Collectors;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -26,9 +22,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 /**
  * Consulta da trilha de auditoria.
  *
- * <p>Acesso só para os e-mails de {@code gps.auditoria.leitores} (variável {@code
- * GPS_AUDITORIA_LEITORES}, separados por vírgula). Lista vazia fecha para todos. Quando os papéis
- * da #19 existirem, a lista dá lugar aos papéis admin e auditor.
+ * <p>Acesso só para os papéis {@code auditor} e {@code admin} ({@link PapeisDoUsuario}): App Role
+ * do Entra repassada pelo proxy ou, enquanto os App Roles não existem, e-mail em {@code
+ * gps.auditoria.leitores} ({@code GPS_AUDITORIA_LEITORES}). Sem nenhum dos dois, fecha para todos.
  */
 @RestController
 @RequestMapping("/api/v1/gps/auditoria")
@@ -38,16 +34,11 @@ public class AuditoriaController {
     private static final int LIMITE_MAXIMO = 5000;
 
     private final TrilhaDeAuditoria trilha;
-    private final Set<String> leitores;
+    private final PapeisDoUsuario papeis;
 
-    public AuditoriaController(
-            TrilhaDeAuditoria trilha, @Value("${gps.auditoria.leitores:}") String leitores) {
+    public AuditoriaController(TrilhaDeAuditoria trilha, PapeisDoUsuario papeis) {
         this.trilha = trilha;
-        this.leitores =
-                Arrays.stream(leitores.split(","))
-                        .map(e -> e.trim().toLowerCase(Locale.ROOT))
-                        .filter(e -> !e.isEmpty())
-                        .collect(Collectors.toUnmodifiableSet());
+        this.papeis = papeis;
     }
 
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
@@ -55,7 +46,7 @@ public class AuditoriaController {
             summary = "Consultar a trilha de auditoria das assinaturas",
             description =
                     "Eventos do mais recente para o mais antigo, com a verificação da cadeia de"
-                            + " hash. Só para leitores configurados em GPS_AUDITORIA_LEITORES.")
+                            + " hash. Só para os papéis auditor e admin.")
     public ResponseEntity<String> consultar(
             @RequestParam(required = false) String usuario,
             @RequestParam(required = false) String certificado,
@@ -66,8 +57,8 @@ public class AuditoriaController {
                     LocalDate ate,
             @RequestParam(defaultValue = "500") int limite)
             throws IOException {
-        IdentidadeDoProxy quem = IdentidadeDoProxy.doMdc();
-        if (!quem.presente() || !leitores.contains(quem.email().toLowerCase(Locale.ROOT))) {
+        Set<PapeisDoUsuario.Papel> deQuem = papeis.de(IdentidadeDoProxy.doMdc());
+        if (!deQuem.contains(PapeisDoUsuario.Papel.AUDITOR)) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN, "Consulta da trilha restrita aos auditores.");
         }

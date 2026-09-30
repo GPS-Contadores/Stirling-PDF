@@ -4,7 +4,9 @@ Toda chamada à assinatura com certificado (`POST /api/v1/security/cert-sign`)
 vira uma linha na trilha: quem assinou, quando, de onde, com qual certificado e
 o hash do documento antes e depois. Desenho completo na
 [#16](https://github.com/GPS-Contadores/Stirling-PDF/issues/16); esta parte é a
-[#18](https://github.com/GPS-Contadores/Stirling-PDF/issues/18).
+[#18](https://github.com/GPS-Contadores/Stirling-PDF/issues/18). Quem pode
+assinar com cada certificado, e os papéis que liberam a consulta, estão em
+[certificados.md](certificados.md) (#19).
 
 A finalização de sessão de assinatura também entra (ver
 [Sessão de assinatura](#sessão-de-assinatura)), embora hoje não seja alcançável.
@@ -148,7 +150,8 @@ volume do `stirling`), um evento JSON por linha, arquivo por mês em UTC.
 ```
 
 - `resultado`: `sucesso`, `erro` (senha errada, arquivo inválido, PDF sem
-  assinatura nova) ou `negado` (sem identidade; na #19, sem permissão).
+  assinatura nova, assinado com outro certificado) ou `negado` (sem identidade,
+  sem permissão para o certificado, lista de certificados inválida).
 - O certificado sai da assinatura gravada no PDF. CPF/CNPJ vem do otherName
   ICP-Brasil (`2.16.76.1.3.3` CNPJ, `2.16.76.1.3.1` CPF) ou do fim do CN. Em
   erro, só se sabe o `arquivo_sha256` do certificado enviado.
@@ -224,8 +227,9 @@ arquivos com mais de 5 anos é manual.
 Resposta: `integridade` (`integra`, `eventos`, onde quebrou e `avisos`), `total` e
 `eventos` do mais recente para o mais antigo, no mesmo formato do arquivo.
 
-Acesso só para os e-mails em `GPS_AUDITORIA_LEITORES`; os outros recebem 403.
-Lista vazia fecha para todos. Os papéis admin/auditor da #19 substituem a lista.
+Acesso só para os papéis `auditor` e `admin` ([certificados.md](certificados.md)):
+App Role do Entra ou, enquanto os App Roles não existem, e-mail em
+`GPS_AUDITORIA_LEITORES`. Os outros recebem 403.
 
 ## Variáveis
 
