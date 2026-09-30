@@ -83,6 +83,16 @@ export const shouldProcessFilesSeparately = (
   );
 };
 
+/**
+ * Whether a PDF → OFX failure is about the account number: the statement does
+ * not print it, or the one typed is not an account. ConvertPDFToOfx.java names
+ * the field as `campo "Número da conta"` in both (NEEDS_ACCOUNT,
+ * INVALID_ACCOUNT), and the Convert tool then highlights the field with the
+ * message instead of showing the error.
+ */
+export const ofxAccountRefusal = (message?: string | null): boolean =>
+  !!message && /campo "N[úu]mero da conta"/i.test(message);
+
 // Static function that can be used by both the hook and automation executor
 export const buildConvertFormData = (
   parameters: ConvertParameters,
@@ -104,6 +114,7 @@ export const buildConvertFormData = (
     ebookOptions,
     epubOptions,
     rubiOptions,
+    ofxOptions,
   } = parameters;
 
   selectedFiles.forEach((file) => {
@@ -170,6 +181,11 @@ export const buildConvertFormData = (
     // refuses (pointing at the cell) if neither has one.
     const calculo = rubiOptions?.calculo?.trim();
     if (calculo) formData.append("calculo", calculo);
+  } else if (fromExtension === "pdf" && toExtension === "ofx") {
+    // Left out when blank: the service then uses the account printed on the
+    // statement, and refuses (pointing at this field) if there is none.
+    const conta = ofxOptions?.conta?.trim();
+    if (conta) formData.append("conta", conta);
   } else if (fromExtension === "cbr" && toExtension === "pdf") {
     formData.append("optimizeForEbook", cbrOptions.optimizeForEbook.toString());
   } else if (fromExtension === "pdf" && toExtension === "cbr") {
@@ -431,6 +447,22 @@ export const convertProcessor = async (
 
   if (!endpoint) {
     throw new Error("Unsupported conversion format");
+  }
+
+  // The typed account replaces the one printed on the statement: sent with
+  // several files, every OFX would come out under the same account.
+  if (
+    parameters.fromExtension === "pdf" &&
+    parameters.toExtension === "ofx" &&
+    parameters.ofxOptions?.conta?.trim() &&
+    selectedFiles.length > 1
+  ) {
+    throw new Error(
+      i18n.t(
+        "convert.ofxContaOneFile",
+        "The account number belongs to one statement: select a single file, or leave the field blank.",
+      ),
+    );
   }
 
   // Convert-specific routing logic: decide batch vs individual processing
